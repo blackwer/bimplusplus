@@ -326,9 +326,16 @@ etaR = params.etaR;
 gam = params.gam;
 
 sys = zeros(2*N,2*N);
-RHS = zeros(2*N,1);
+sys_low = zeros(N, 2*N);
+sys_high = zeros(N, 2*N);
+RHS = zeros(N, 2);
+%% can now use parfor on this loop, but it's not really much faster...
+%% 2 threads gives me about a 20% speedup. 12 threads ~2x.
+%% numthreads = 4;
+%% parfor (m = 1:N, numthreads)
 for m = 1:N
     temp = zeros(2,1);
+    sys_row = zeros(2, 2*N);
     for n = 1:N
         if m ~= n  %off diagonal terms are pv integrals (skip over singularity)
             precomp = precompute(params, positions(:,m), positions(:,n));
@@ -340,15 +347,23 @@ for m = 1:N
 
             G_prime = fs_vel_p(params, precomp, tangents(:,n));
 
-            sys(2*m-1:2*m,2*n-1:2*n) =  -(L/N)*(M1+M2) - (L/N)*...
+            sys_row(:,2*n-1:2*n) =  -(L/N)*(M1+M2) - (L/N)*...
                 G_prime*2*(-1*eta0*eye(2) + etaR*[0, 1;-1, 0]);
             temp = temp + ...
                 G_prime*(-1*etaR*positions(:,n)-gam*tangents(:,n)); %% outward vs inward n confusion
         else       %diagonal terms
-            sys(2*m-1:2*m,2*n-1:2*n) = (1/2)*eye(2);
+            sys_row(:,2*n-1:2*n) = (1/2)*eye(2);
         end
     end
-    RHS(2*m-1:2*m) = (L/N)*temp;
+    RHS(m,:) = (L/N)*temp;
+    sys_low(m,:) = sys_row(1,:);
+    sys_high(m,:) = sys_row(2,:);
+end
+RHS = reshape(RHS',[2*N,1]);
+
+for m = 1:N
+    sys(2*m-1,:) = sys_low(m,:);
+    sys(2*m,:) = sys_high(m,:);
 end
 
 [vel,~] = gmres(sys,RHS,[],toler,N,[],[],vel_prev); %two outputs suppresses printing
@@ -362,11 +377,6 @@ global N;
 out = 2*pi/N*sum(vec);
 
 end
-
-
-
-
-
 
 
 
