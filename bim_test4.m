@@ -222,12 +222,16 @@ lam = 1/delta;
 rbar = r*lam;
 drds = dot(t,d/r);
 
+bk0 = besselk(0, rbar);
+bk1 = besselk(1, rbar);
+bk2 = besselk(2, rbar);
+
 %delta_ij = mod(i + j+1,2)
 term1= zeros(2,2);
 for i = 1:2
     for k = 1:2
-        term1(i,k) = mod(i+k+1,2)*(2*r*(-1+rbar*besselk(1,rbar)+rbar^2*besselk(0,rbar))+r*rbar^2*(besselk(0,rbar)-rbar*besselk(1,rbar)))*drds...
-            + t(i)*d(k)*(2-rbar^2*besselk(2,rbar)) + d(i)*t(k)*(2-rbar^2*besselk(2,rbar)) + d(i)*d(k)*rbar^2*besselk(1,rbar)*drds*lam;
+        term1(i,k) = mod(i+k+1,2)*(2*r*(-1+rbar*bk1+rbar^2*bk0)+r*rbar^2*(bk0-rbar*bk1))*drds...
+            + t(i)*d(k)*(2-rbar^2*bk2) + d(i)*t(k)*(2-rbar^2*bk2) + d(i)*d(k)*rbar^2*bk1*drds*lam;
     end
 end
 term2 = 8*pi*etabar/delta^2*r^3*drds*fs_vel(source,field);
@@ -239,7 +243,7 @@ end
 
 %% T = fundamental traction solution in 2D assuming normal = radial vector (2x2 matrix)
 %% only pressure + shear stress components
-function out = fs_trac(source,field)
+function T = fs_trac(source,field)
 
 global delta;
 
@@ -250,19 +254,20 @@ rbar = r*lam;
 
 %delta_ij = mod(i + j+1,2)
 
+bk1 = besselk(1, rbar);
+bk2 = besselk(2, rbar);
+bk3 = besselk(3, rbar);
+
 T = zeros(2,2,2); %T_ijk
 for i = 1:2
     for j = 1:2
         for k = 1:2
-            T(i,j,k) = mod(i+j+1,2)*d(k)*(4-rbar^2-2*rbar^2*besselk(2,rbar))/(2*pi*lam^2*r^4)...
-                + (mod(i+k+1,2)*d(j)+mod(j+k+1,2)*d(i))*(4-2*rbar^2*besselk(2,rbar)-rbar^3*besselk(1,rbar))/(2*pi*lam^2*r^4)...
-                + d(i)*d(j)*d(k)*(-8+rbar^3*besselk(3,rbar))/(pi*lam^2*r^6);
+            T(i,j,k) = mod(i+j+1,2)*d(k)*(4-rbar^2-2*rbar^2*bk2)/(2*pi*lam^2*r^4)...
+                + (mod(i+k+1,2)*d(j)+mod(j+k+1,2)*d(i))*(4-2*rbar^2*bk2-rbar^3*bk1)/(2*pi*lam^2*r^4)...
+                + d(i)*d(j)*d(k)*(-8+rbar^3*bk3)/(pi*lam^2*r^6);
         end
     end
 end
-
-out = T;
-
 
 end
 
@@ -315,11 +320,13 @@ for m = 1:N
                   normals(1,n)*T(1,1,2) normals(1,n)*T(2,1,2)];
             M2 = [normals(2,n)*T(1,2,1) normals(2,n)*T(2,2,1); %already transposed
                   normals(2,n)*T(1,2,2) normals(2,n)*T(2,2,2)];
+
+            G_prime = fs_vel_p(positions(:,m),positions(:,n),tangents(:,n));
+
             sys(2*m-1:2*m,2*n-1:2*n) =  -(L/N)*(M1+M2) - (L/N)*...
-                fs_vel_p(positions(:,m),positions(:,n),tangents(:,n))*...
-                2*(-1*etaO*eye(2) + etaR*[0, 1;-1, 0]);
-            temp = temp + fs_vel_p(positions(:,m),positions(:,n),tangents(:,n))...
-                *(-1*etaR*positions(:,n)-gam*tangents(:,n)); %% outward vs inward n confusion
+                G_prime*2*(-1*etaO*eye(2) + etaR*[0, 1;-1, 0]);
+            temp = temp + ...
+                G_prime*(-1*etaR*positions(:,n)-gam*tangents(:,n)); %% outward vs inward n confusion
         else       %diagonal terms
             sys(2*m-1:2*m,2*n-1:2*n) = (1/2)*eye(2);
         end
