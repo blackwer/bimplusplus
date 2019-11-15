@@ -347,8 +347,8 @@ for m = 1:N
         else       %diagonal terms
             sys(2*m-1:2*m,2*n-1:2*n) = (1/2)*eye(2);
         end
-    RHS(2*m-1:2*m) = (L/N)*temp;
     end
+    RHS(2*m-1:2*m) = (L/N)*temp;
 end
 
 [vel,~] = gmres(sys,RHS,[],toler,N,[],[],vel_prev); %two outputs suppresses printing
