@@ -10,15 +10,15 @@ clc; close all;
 tic;
 
 %% --------- physical parameters (let Omega = 1) --------
-global etaR; etaR = 1; %rotational viscosity
-global eta; eta = 1; %shear viscosity
-global etaO; etaO = 1; %odd viscosity
-global G; G = 10; %substrate drag (big Gamma)
-global delta; delta = sqrt((eta+etaR)/G); %BL length scale
-global gam; gam = 0.01; %line tension (little gamma)
+params.etaR = 1; %rotational viscosity
+params.eta = 1; %shear viscosity
+params.eta0 = 1; %odd viscosity
+params.G = 10; %substrate drag (big Gamma)
+params.delta = sqrt((params.eta+params.etaR)/params.G); %BL length scale
+params.gam = 0.01; %line tension (little gamma)
 
 %% -------- numerical parameters --------
-global N; N = 2^7-1; %number of points on curve
+params.N = 2^7-1; %number of points on curve
 dt = 0.001;
 t = 0; %time
 t_max = 0.1;
@@ -28,7 +28,7 @@ window_y = 1.2;
 soltol = 1e-12;
 
 %% -------- initialize boundary (periodic BCs) ---------
-alpha = linspace(0,2*pi,N+1); alpha = alpha(1:end-1); %fixed dimensionless parameterization
+alpha = linspace(0,2*pi,params.N+1); alpha = alpha(1:end-1); %fixed dimensionless parameterization
 eps = 0.1; %perturbation amplitude
 mp = 4; %perturbation mode
 x = cos(alpha) + eps*sin(mp*alpha).*cos(alpha);
@@ -38,7 +38,7 @@ y = sin(alpha) + eps*sin(mp*alpha).*sin(alpha);
 dxda = D(x,alpha); %dx/d(alpha)
 dyda = D(y,alpha); %dy/d(alpha)
 L_n = trapzp(sqrt(dxda.^2+dyda.^2));
-s_i = linspace(0,L_n,N+1); s_i = s_i(1:end-1); %arclength coordinate (uniform spacing)
+s_i = linspace(0,L_n,params.N+1); s_i = s_i(1:end-1); %arclength coordinate (uniform spacing)
 a_i = zeros(size(s_i));
 for i = 1:length(a_i)
     a_i(i) = fzero(@(a) s_i(i) - integral(@(ap) sqrt(mp^2*eps^2*cos(ap*mp).^2+(1+eps*sin(ap*mp)).^2),0,a),0.1);
@@ -64,7 +64,7 @@ area_n = trapzp(x_i.^2+y_i.^2)/2; % integral of r dr dtheta
 % ind = trapzp(kappa_n)*L_n/(2*pi); %equals 2*pi
 
 %% -------- given curve, solve linear system for flow --------
-uv_np1 = inteqnsolve(positions_n,tangents_n,normals_n,L_n,soltol,zeros(2*N,1)); %2Nx1 matrix
+uv_np1 = inteqnsolve(params, positions_n,tangents_n,normals_n,L_n,soltol,zeros(2*params.N,1)); %2Nx1 matrix
 
 %% -------- plots --------
 %plot(theta_n); hold on; grid on;
@@ -131,7 +131,7 @@ while t < t_max
     % dx/dt = u(x,y,t), dy/dt = v(x,y,t), yn+1 = yn + dt/2*(3*f(tn,yn)-f(tn-1,yn-1))
     
     %% compute U and T
-    uv_np2 = inteqnsolve(positions_np1,tangents_np1,normals_np1,L_np1,soltol,2*uv_np1-uv_n); %2Nx1 matrix
+    uv_np2 = inteqnsolve(params, positions_np1,tangents_np1,normals_np1,L_np1,soltol,2*uv_np1-uv_n); %2Nx1 matrix
     U_np1 = sum(normals_np1.*[uv_np2(1:2:end-1) uv_np2(2:2:end)]'); 
     T_np1 = cumtrapz(alpha,dthda_np1.*U_np1) - alpha/(2*pi)*trapzp(dthda_np1.*U_np1);    
     
@@ -192,39 +192,44 @@ toc;
 end
 
 %% G = fundamental velocity solution in 2D (2x2 matrix)
-function out = fs_vel(source,field)
-global delta;
-global eta;
-global etaR;
+function out = fs_vel(params, precomp)
+etabar = params.eta + params.etaR;
+r = precomp.r;
+d = precomp.d;
 
-etabar = eta+etaR;
-r = norm(field-source);
-d = field-source;
+rbar = precomp.rbar;
+rbar2 = precomp.rbar2;
+delta = params.delta;
 
-out = eye(2)*(-1+1/delta*r*besselk(1,1/delta*r) + 1/delta^2*r^2*besselk(0,1/delta*r))/...
-    (2*pi*1/delta^2*etabar*r^2) + (d*d')*(2-1/delta^2*r^2*besselk(2,1/delta*r))/...
-    (2*pi*1/delta^2*etabar*r^4);
+bk0 = precomp.bk0;
+bk1 = precomp.bk1;
+bk2 = precomp.bk2;
+
+out = eye(2)*(-1+rbar*bk1 + rbar2*bk0)/...
+    (2*pi*rbar2*etabar) + (d*d')*(2-rbar2*bk2)/...
+    (2*pi*r^2*rbar2*etabar);
 
 end
 
 %% G' = derivative of G wrt s, depends on tangent at field, t
-function out = fs_vel_p(source,field,t)
+function out = fs_vel_p(params, precomp, t)
 
-global delta;
-global eta;
-global etaR;
+delta = params.delta;
+eta = params.eta;
+etaR = params.etaR;
 
 etabar = eta+etaR;
 
-r = norm(field-source);
-d = field-source;
-lam = 1/delta;
-rbar = r*lam;
+r = precomp.r;
+d = precomp.d;
+lam = precomp.lam;
+rbar = precomp.rbar;
+rbar2 = precomp.rbar2;
 drds = dot(t,d/r);
 
-bk0 = besselk(0, rbar);
-bk1 = besselk(1, rbar);
-bk2 = besselk(2, rbar);
+bk0 = precomp.bk0;
+bk1 = precomp.bk1;
+bk2 = precomp.bk2;
 
 %delta_ij = mod(i + j+1,2)
 term1= zeros(2,2);
@@ -234,7 +239,7 @@ for i = 1:2
             + t(i)*d(k)*(2-rbar^2*bk2) + d(i)*t(k)*(2-rbar^2*bk2) + d(i)*d(k)*rbar^2*bk1*drds*lam;
     end
 end
-term2 = 8*pi*etabar/delta^2*r^3*drds*fs_vel(source,field);
+term2 = 8*pi*etabar*r*rbar2*drds*fs_vel(params, precomp);
 
 out = (term1-term2)/(2*pi*etabar*r^4/delta^2); 
 
@@ -243,20 +248,18 @@ end
 
 %% T = fundamental traction solution in 2D assuming normal = radial vector (2x2 matrix)
 %% only pressure + shear stress components
-function T = fs_trac(source,field)
+function T = fs_trac(params, precomp)
 
-global delta;
-
-r = norm(field-source);
-d = field-source;
-lam = 1/delta;
-rbar = r*lam;
+r = precomp.r;
+d = precomp.d;
+lam = precomp.lam;
+rbar = precomp.rbar;
 
 %delta_ij = mod(i + j+1,2)
 
-bk1 = besselk(1, rbar);
-bk2 = besselk(2, rbar);
-bk3 = besselk(3, rbar);
+bk1 = precomp.bk1;
+bk2 = precomp.bk2;
+bk3 = precomp.bk3;
 
 T = zeros(2,2,2); %T_ijk
 for i = 1:2
@@ -301,13 +304,26 @@ dfdx = ifft(-k.*k.*F);
 
 end
 
-%% solve the boundary integral equation given a closed curve
-function vel = inteqnsolve(positions,tangents,normals,L,toler,vel_prev)
+function precomp = precompute(params, source, field)
+precomp.d = field-source;
+precomp.r = norm(precomp.d);
+precomp.lam = 1/params.delta;
+precomp.rbar = precomp.r*precomp.lam;
+precomp.rbar2 = precomp.rbar*precomp.rbar;
+precomp.bk0 = besselk(0, precomp.rbar);
+precomp.bk1 = besselk(1, precomp.rbar);
+precomp.bk2 = besselk(2, precomp.rbar);
+precomp.bk3 = besselk(3, precomp.rbar);
 
-global N;
-global etaO;
-global etaR;
-global gam;
+end
+
+%% solve the boundary integral equation given a closed curve
+function vel = inteqnsolve(params,positions,tangents,normals,L,toler,vel_prev)
+
+N = params.N;
+eta0 = params.eta0;
+etaR = params.etaR;
+gam = params.gam;
 
 sys = zeros(2*N,2*N);
 RHS = zeros(2*N,1);
@@ -315,16 +331,17 @@ for m = 1:N
     temp = zeros(2,1);
     for n = 1:N
         if m ~= n  %off diagonal terms are pv integrals (skip over singularity)
-            T = fs_trac(positions(:,m),positions(:,n));
+            precomp = precompute(params, positions(:,m), positions(:,n));
+            T = fs_trac(params, precomp);
             M1 = [normals(1,n)*T(1,1,1) normals(1,n)*T(2,1,1); %already transposed
                   normals(1,n)*T(1,1,2) normals(1,n)*T(2,1,2)];
             M2 = [normals(2,n)*T(1,2,1) normals(2,n)*T(2,2,1); %already transposed
                   normals(2,n)*T(1,2,2) normals(2,n)*T(2,2,2)];
 
-            G_prime = fs_vel_p(positions(:,m),positions(:,n),tangents(:,n));
+            G_prime = fs_vel_p(params, precomp, tangents(:,n));
 
             sys(2*m-1:2*m,2*n-1:2*n) =  -(L/N)*(M1+M2) - (L/N)*...
-                G_prime*2*(-1*etaO*eye(2) + etaR*[0, 1;-1, 0]);
+                G_prime*2*(-1*eta0*eye(2) + etaR*[0, 1;-1, 0]);
             temp = temp + ...
                 G_prime*(-1*etaR*positions(:,n)-gam*tangents(:,n)); %% outward vs inward n confusion
         else       %diagonal terms
