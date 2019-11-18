@@ -3,10 +3,10 @@
 %% nonaxisymmetric case, AB2 time stepping
 %% WIP
 
-function [] = bim_test4()
+%% function [] = bim_test4()
 
 %% -------- startup --------
-clc; close all; 
+clc; close all;
 tic;
 
 %% --------- physical parameters (let Omega = 1) --------
@@ -37,7 +37,7 @@ y = sin(alpha) + eps*sin(mp*alpha).*sin(alpha);
 %% -------- geometric quantities --------
 dxda = D(x,alpha); %dx/d(alpha)
 dyda = D(y,alpha); %dy/d(alpha)
-L_n = trapzp(sqrt(dxda.^2+dyda.^2));
+L_n = trapzp(sqrt(dxda.^2+dyda.^2), params.N);
 s_i = linspace(0,L_n,params.N+1); s_i = s_i(1:end-1); %arclength coordinate (uniform spacing)
 a_i = zeros(size(s_i));
 for i = 1:length(a_i)
@@ -55,11 +55,11 @@ tangents_n = [(x_ip*2*pi/L_n); (y_ip*2*pi/L_n)];
 normals_n = [-(y_ip*2*pi/L_n); (x_ip*2*pi/L_n)];
 kappa_n = (x_ip.*y_ipp - y_ip.*x_ipp)./(sqrt(x_ip.^2+y_ip.^2)).^3;
 theta_n = atan2(y_ip(1),x_ip(1)) + L_n/(2*pi)*cumtrapz(alpha,kappa_n) ...
-          + (2*pi - L_n/(2*pi)*trapzp(kappa_n));
+          + (2*pi - L_n/(2*pi)*trapzp(kappa_n, params.N));
 dthda_n = L_n/(2*pi)*kappa_n;
 
-area_n = trapzp(x_i.^2+y_i.^2)/2; % integral of r dr dtheta
-% cm_n = [2*pi/3/area_n/L_n*trapzp(x_i.*(x_i.^2+y_i.^2)) ; 
+area_n = trapzp(x_i.^2+y_i.^2, params.N)/2; % integral of r dr dtheta
+% cm_n = [2*pi/3/area_n/L_n*trapzp(x_i.*(x_i.^2+y_i.^2)) ;
 %         2*pi/3/area_n/L_n*trapzp(y_i.*(x_i.^2+y_i.^2))];
 % ind = trapzp(kappa_n)*L_n/(2*pi); %equals 2*pi
 
@@ -68,7 +68,7 @@ uv_np1 = inteqnsolve(params, positions_n,tangents_n,normals_n,L_n,soltol,zeros(2
 
 %% -------- plots --------
 %plot(theta_n); hold on; grid on;
-% plot(alpha,(u'.*cos(theta_n)+v'.*sin(theta_n))); hold on; grid on; 
+% plot(alpha,(u'.*cos(theta_n)+v'.*sin(theta_n))); hold on; grid on;
 % plot(alpha,(u'.*sin(theta_n)-v'.*cos(theta_n)));
 % vtrue = delta*etaR*besseli(1,1/delta)/(eta*besseli(2,1/delta)+etaR*besseli(0,1/delta))
 % plot(alpha,vtrue*cos(alpha),'o-');
@@ -90,22 +90,22 @@ for j = 1
 %% compute U
 U_n = sum(normals_n.*[uv_np1(1:2:end-1) uv_np1(2:2:end)]');
 q2 = quiver(positions_n(1,:),positions_n(2,:),U_n.*normals_n(1,:),U_n.*normals_n(2,:)); q2.AutoScale = 'off';
-T_n = cumtrapz(alpha,dthda_n.*U_n) - alpha/(2*pi)*trapzp(dthda_n.*U_n);
+T_n = cumtrapz(alpha,dthda_n.*U_n) - alpha/(2*pi)*trapzp(dthda_n.*U_n, params.N);
 
 %% update theta and L (Euler forward for 1 step)
-L_np1 = L_n - dt*trapzp(dthda_n.*U_n);
+L_np1 = L_n - dt*trapzp(dthda_n.*U_n, params.N);
 theta_np1 = theta_n + dt*(2*pi/L_n)*(D(U_n,alpha) + dthda_n.*T_n);
 tangents_np1 = [cos(theta_np1); sin(theta_np1)];
 normals_np1 = [-sin(theta_np1); cos(theta_np1)];
 
 %% update 1 point, then use (x,y) = integral of tangent
 X_np1 = positions_n(:,1) + dt*(U_n(1)*normals_n(:,1) + T_n(1)*tangents_n(:,1));
-x_np1 = X_np1(1) + L_np1/(2*pi)*cumtrapz(alpha,cos(theta_np1)) - L_np1/(2*pi)*trapzp(cos(theta_np1));
-y_np1 = X_np1(2) + L_np1/(2*pi)*cumtrapz(alpha,sin(theta_np1)) - L_np1/(2*pi)*trapzp(sin(theta_np1));
+x_np1 = X_np1(1) + L_np1/(2*pi)*cumtrapz(alpha,cos(theta_np1)) - L_np1/(2*pi)*trapzp(cos(theta_np1), params.N);
+y_np1 = X_np1(2) + L_np1/(2*pi)*cumtrapz(alpha,sin(theta_np1)) - L_np1/(2*pi)*trapzp(sin(theta_np1), params.N);
 positions_np1 = [x_np1; y_np1];
 
 %% conserved quantities
-area_np1 = trapzp(x_np1.^2+y_np1.^2)/2; % integral of r dr dtheta
+area_np1 = trapzp(x_np1.^2+y_np1.^2, params.N)/2; % integral of r dr dtheta
 %cm_np1 = [2*pi/3/area_np1/L_np1*trapzp(x_np1.*(x_np1.^2+y_np1.^2)) ;
 %          2*pi/3/area_np1/L_np1*trapzp(y_np1.*(x_np1.^2+y_np1.^2))];
 
@@ -114,7 +114,7 @@ x_ip = D(x_i,alpha); x_ipp = D2(x_i,alpha);
 y_ip = D(y_i,alpha); y_ipp = D2(y_i,alpha);
 dthda_np1 = L_np1/(2*pi)*(x_ip.*y_ipp - y_ip.*x_ipp)./(sqrt(x_ip.^2+y_ip.^2)).^3;
 
-%clf; 
+%clf;
 t = t + dt;
 plot(x_np1,y_np1,'ro-','LineWidth',2); hold on; grid on;
 axis([-window_x window_x -window_y window_y]); axis equal;
@@ -126,40 +126,40 @@ end
 %% -------- time stepping -------
 uv_n = uv_np1;
 while t < t_max
-    
+
     %% update positions (simple AB2 scheme, do we need higher order?)
     % dx/dt = u(x,y,t), dy/dt = v(x,y,t), yn+1 = yn + dt/2*(3*f(tn,yn)-f(tn-1,yn-1))
-    
+
     %% compute U and T
     uv_np2 = inteqnsolve(params, positions_np1,tangents_np1,normals_np1,L_np1,soltol,2*uv_np1-uv_n); %2Nx1 matrix
-    U_np1 = sum(normals_np1.*[uv_np2(1:2:end-1) uv_np2(2:2:end)]'); 
-    T_np1 = cumtrapz(alpha,dthda_np1.*U_np1) - alpha/(2*pi)*trapzp(dthda_np1.*U_np1);    
-    
+    U_np1 = sum(normals_np1.*[uv_np2(1:2:end-1) uv_np2(2:2:end)]');
+    T_np1 = cumtrapz(alpha,dthda_np1.*U_np1) - alpha/(2*pi)*trapzp(dthda_np1.*U_np1, params.N);
+
     %% update theta and L
-    L_np2 = L_np1 - dt/2*(3*trapzp(dthda_np1.*U_np1) - trapzp(dthda_n.*U_n)); %AB2
+    L_np2 = L_np1 - dt/2*(3*trapzp(dthda_np1.*U_np1, params.N) - trapzp(dthda_n.*U_n, params.N)); %AB2
     theta_np2 = theta_np1 + dt/2*(3*(2*pi/L_np2)*(D(U_np1,alpha) + dthda_np1.*T_np1) - (2*pi/L_np1)*(D(U_n,alpha) + dthda_n.*T_n));
     tangents_np2 = [cos(theta_np2); sin(theta_np2)];
     normals_np2 = [-sin(theta_np2); cos(theta_np2)];
-    
+
     %% integrate tangent to get X(alpha)
     X_np2 = positions_np1(:,1) + dt/2*(3*U_np1(1)*normals_np2(:,1) - U_n(1)*normals_np1(:,1)); %AB2
-    x_np2 = X_np2(1) + L_np2/(2*pi)*cumtrapz(alpha,cos(theta_np2)) - L_np2/(2*pi)*trapzp(cos(theta_np2));
-    y_np2 = X_np2(2) + L_np2/(2*pi)*cumtrapz(alpha,sin(theta_np2)) - L_np2/(2*pi)*trapzp(sin(theta_np2));
+    x_np2 = X_np2(1) + L_np2/(2*pi)*cumtrapz(alpha,cos(theta_np2)) - L_np2/(2*pi)*trapzp(cos(theta_np2), params.N);
+    y_np2 = X_np2(2) + L_np2/(2*pi)*cumtrapz(alpha,sin(theta_np2)) - L_np2/(2*pi)*trapzp(sin(theta_np2), params.N);
     positions_np2 = [x_np2; y_np2];
-    
+
     %% conserved quantities
-    area_np2 = trapzp(x_np2.^2+y_np2.^2)/2; % integral of r dr dtheta
-%     cm_np2 = [2*pi/3/area_np2/L_np1*trapzp(x_np2.*(x_np2.^2+y_np2.^2)) ; 
+    area_np2 = trapzp(x_np2.^2+y_np2.^2, params.N)/2; % integral of r dr dtheta
+%     cm_np2 = [2*pi/3/area_np2/L_np1*trapzp(x_np2.*(x_np2.^2+y_np2.^2)) ;
 %               2*pi/3/area_np2/L_np1*trapzp(y_np2.*(x_np2.^2+y_np2.^2))];
-    
+
     %% calculate new curvature
     x_ip = D(x_np2,alpha); x_ipp = D2(x_np2,alpha);
     y_ip = D(y_np2,alpha); y_ipp = D2(y_np2,alpha);
     dthda_np2 = L_np2/(2*pi)*(x_ip.*y_ipp - y_ip.*x_ipp)./(sqrt(x_ip.^2+y_ip.^2)).^3;
-    
+
     %% plot & save image
     clf;
-    plot([x_np2 x_np2(1)],[y_np2 y_np2(1)],'bo-','LineWidth',2); grid on; 
+    plot([x_np2 x_np2(1)],[y_np2 y_np2(1)],'bo-','LineWidth',2); grid on;
     axis([-window_x window_x -window_y window_y]); axis equal; hold on;
     plot(sqrt(area_n/pi)*[cos(alpha) cos(alpha(1))],sqrt(area_n/pi)*[sin(alpha) sin(alpha(1))],'r-');
     %plot(cm_np2(1),cm_np2(2),'r.','MarkerSize',10);
@@ -173,8 +173,6 @@ while t < t_max
     positions_np1 = positions_np2; normals_np1 = normals_np2; tangents_np1 = tangents_np2;
     L_np1 = L_np2; dthda_np1 = dthda_np2; theta_np1 = theta_np2; uv_np1 = uv_np2;
     t = t + dt;
-    
-    
 end
 
 
@@ -189,7 +187,7 @@ close(VW);
 fclose(fileID);
 toc;
 
-end
+%% end
 
 %% G = fundamental velocity solution in 2D (2x2 matrix)
 function out = fs_vel(params, precomp)
@@ -241,7 +239,7 @@ for i = 1:2
 end
 term2 = 8*pi*etabar*r*rbar2*drds*fs_vel(params, precomp);
 
-out = (term1-term2)/(2*pi*etabar*r^4/delta^2); 
+out = (term1-term2)/(2*pi*etabar*r^4/delta^2);
 
 
 end
@@ -314,7 +312,6 @@ precomp.bk0 = besselk(0, precomp.rbar);
 precomp.bk1 = besselk(1, precomp.rbar);
 precomp.bk2 = besselk(2, precomp.rbar);
 precomp.bk3 = besselk(3, precomp.rbar);
-
 end
 
 %% solve the boundary integral equation given a closed curve
@@ -371,20 +368,8 @@ end
 end
 
 %% periodic trapezoid rule over full period w.r.t. alpha = s*2pi/L
-function out = trapzp(vec)
-global N;
+function out = trapzp(vec, N)
 
 out = 2*pi/N*sum(vec);
 
 end
-
-
-
-
-
-
-
-
-
-
-
