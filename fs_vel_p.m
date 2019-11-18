@@ -14,9 +14,9 @@ rbar = precomp.rbar;
 rbar2 = precomp.rbar2;
 drds = dot(t,d/r);
 
-bk0 = precomp.bk0;
-bk1 = precomp.bk1;
-bk2 = precomp.bk2;
+bk0 = precomp.bk(1);
+bk1 = precomp.bk(2);
+bk2 = precomp.bk(3);
 
 %delta_ij = mod(i + j+1,2)
 term1= zeros(2,2);
