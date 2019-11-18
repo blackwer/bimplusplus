@@ -15,6 +15,7 @@ params.eta = 1; %shear viscosity
 params.eta0 = 1; %odd viscosity
 params.G = 10; %substrate drag (big Gamma)
 params.delta = sqrt((params.eta+params.etaR)/params.G); %BL length scale
+params.lam = 1.0 / params.delta;
 params.gam = 0.01; %line tension (little gamma)
 
 %% -------- numerical parameters --------
@@ -131,7 +132,7 @@ while t < t_max
     % dx/dt = u(x,y,t), dy/dt = v(x,y,t), yn+1 = yn + dt/2*(3*f(tn,yn)-f(tn-1,yn-1))
 
     %% compute U and T
-    uv_np2 = inteqnsolve(params, positions_np1,tangents_np1,normals_np1,L_np1,soltol,2*uv_np1-uv_n); %2Nx1 matrix
+    uv_np2 = inteqnsolve_vectorized(params, positions_np1,tangents_np1,normals_np1,L_np1,soltol,2*uv_np1-uv_n); %2Nx1 matrix
     U_np1 = sum(normals_np1.*[uv_np2(1:2:end-1) uv_np2(2:2:end)]');
     T_np1 = cumtrapz(alpha,dthda_np1.*U_np1) - alpha/(2*pi)*trapzp(dthda_np1.*U_np1, params.N);
 
