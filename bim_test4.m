@@ -3,7 +3,7 @@
 %% nonaxisymmetric case, AB2 time stepping
 %% WIP
 
-%% function [] = bim_test4()
+function [] = bim_test4()
 
 %% -------- startup --------
 clc; close all;
@@ -188,7 +188,7 @@ close(VW);
 fclose(fileID);
 toc;
 
-%% end
+end
 
 %% notes about FFT in MATLAB
 %1. output is returned out of natural order, use fftshift
