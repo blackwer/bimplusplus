@@ -10,23 +10,31 @@ sys = zeros(2*N,2*N);
 sys_low = zeros(N, 2*N);
 sys_high = zeros(N, 2*N);
 RHS = zeros(N, 2);
-%% can now use parfor on this loop, but it's not really much faster...
-%% 2 threads gives me about a 20% speedup. 12 threads ~2x.
-%% numthreads = 4;
-%% parfor (m = 1:N, numthreads)
 for m = 1:N
     temp = zeros(2,1);
     sys_row = zeros(2, 2*N);
+
+    source = positions(:,m);
+    d = positions-source;
+    r = sqrt(sum(d.^2,1));
+    rbar = r*params.lam;
+    rbar2 = rbar.*rbar;
+    bk0 = besselk(0, rbar);
+    bk1 = besselk(1, rbar);
+    bk2 = besselk(2, rbar);
+    bk3 = besselk(3, rbar);
+
     for n = 1:N
         if m ~= n  %off diagonal terms are pv integrals (skip over singularity)
-            precomp = precompute(params, positions(:,m), positions(:,n));
-            T = fs_trac(params, precomp);
+            bk = [bk0(n), bk1(n), bk2(n), bk3(n)];
+            T = fs_trac(params, d(:,n), r(n), rbar(n), bk);
             M1 = [normals(1,n)*T(1,1,1) normals(1,n)*T(2,1,1); %already transposed
                   normals(1,n)*T(1,1,2) normals(1,n)*T(2,1,2)];
             M2 = [normals(2,n)*T(1,2,1) normals(2,n)*T(2,2,1); %already transposed
                   normals(2,n)*T(1,2,2) normals(2,n)*T(2,2,2)];
 
-            G_prime = fs_vel_p(params, precomp, tangents(:,n));
+            G_prime = fs_vel_p(params, tangents(:,n), d(:,n), r(n),...
+                rbar(n), rbar2(n), bk);
 
             sys_row(:,2*n-1:2*n) =  -(L/N)*(M1+M2) - (L/N)*...
                 G_prime*2*(-1*eta0*eye(2) + etaR*[0, 1;-1, 0]);

@@ -1,16 +1,13 @@
-function T = fs_trac(params, precomp)
+function T = fs_trac(params, d, r, rbar, bk)
 %% FS_TRAC fundamental traction solution in 2D assuming normal = radial vector (2x2 matrix)
 %% only pressure + shear stress components
-r = precomp.r;
-d = precomp.d;
 lam = params.lam;
-rbar = precomp.rbar;
 
 %delta_ij = mod(i + j+1,2)
 
-bk1 = precomp.bk(2);
-bk2 = precomp.bk(3);
-bk3 = precomp.bk(4);
+bk1 = bk(2);
+bk2 = bk(3);
+bk3 = bk(4);
 
 coeff1 = (4-rbar^2-2*rbar^2*bk2)/(2*pi*lam^2*r^4);
 coeff2 = (4-2*rbar^2*bk2-rbar^3*bk1)/(2*pi*lam^2*r^4);

@@ -1,4 +1,4 @@
-function out = fs_vel_p(params, precomp, t)
+function out = fs_vel_p(params, t, d, r, rbar, rbar2, bk)
 %% G' = derivative of G wrt s, depends on tangent at field, t
 
 delta = params.delta;
@@ -8,15 +8,11 @@ lam = params.lam;
 
 etabar = eta+etaR;
 
-r = precomp.r;
-d = precomp.d;
-rbar = precomp.rbar;
-rbar2 = precomp.rbar2;
 drds = dot(t,d/r);
 
-bk0 = precomp.bk(1);
-bk1 = precomp.bk(2);
-bk2 = precomp.bk(3);
+bk0 = bk(1);
+bk1 = bk(2);
+bk2 = bk(3);
 
 term1 = eye(2)*(2*r*(-1+rbar*bk1+rbar2*bk0)+r*rbar2*(bk0-rbar*bk1))*drds +...
     t*d'*(2-rbar2*bk2) + d*t'*(2-rbar2*bk2) + d*d'*rbar2*bk1*drds*lam;
