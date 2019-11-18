@@ -10,10 +10,6 @@ sys = zeros(2*N,2*N);
 sys_low = zeros(N, 2*N);
 sys_high = zeros(N, 2*N);
 RHS = zeros(N, 2);
-%% can now use parfor on this loop, but it's not really much faster...
-%% 2 threads gives me about a 20% speedup. 12 threads ~2x.
-%% numthreads = 4;
-%% parfor (m = 1:N, numthreads)
 for m = 1:N
     temp = zeros(2,1);
     sys_row = zeros(2, 2*N);
