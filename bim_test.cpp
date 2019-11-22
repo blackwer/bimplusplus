@@ -6,6 +6,10 @@
 #include <gsl/gsl_roots.h>
 #include <gsl/gsl_sf.h>
 
+#include <Eigen/Core>
+#include <Eigen/Dense>
+#include <unsupported/Eigen/IterativeSolvers>
+
 #include "function_generator.hpp"
 
 typedef struct {
@@ -22,19 +26,22 @@ typedef struct {
 typedef std::vector<std::vector<double>> dmat;
 typedef std::vector<double> dvec;
 
-void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
-                 dmat &normals, double L, double tol, dvec &vel_prev) {
+using std::cout;
+using std::endl;
+
+Eigen::VectorXd inteqnsolve(const param_t &params, const dmat &positions,
+                            const dmat &tangents, const dmat &normals,
+                            const double L, const double tol) {
     auto f_bk0 = [](double x) { return gsl_sf_bessel_Kn(0, x); };
     auto f_bk1 = [](double x) { return gsl_sf_bessel_Kn(1, x); };
     auto f_bk2 = [](double x) { return gsl_sf_bessel_Kn(2, x); };
     auto f_bk3 = [](double x) { return gsl_sf_bessel_Kn(3, x); };
-    FunctionGenerator<8, 4096, double> bessel_0(f_bk0, 1e-10, 100);
-    FunctionGenerator<8, 4096, double> bessel_1(f_bk1, 1e-10, 100);
-    FunctionGenerator<8, 4096, double> bessel_2(f_bk2, 1e-10, 100);
-    FunctionGenerator<8, 4096, double> bessel_3(f_bk3, 1e-10, 100);
+    static FunctionGenerator<8, 4096, double> bessel_0(f_bk0, 1e-10, 100);
+    static FunctionGenerator<8, 4096, double> bessel_1(f_bk1, 1e-10, 100);
+    static FunctionGenerator<8, 4096, double> bessel_2(f_bk2, 1e-10, 100);
+    static FunctionGenerator<8, 4096, double> bessel_3(f_bk3, 1e-10, 100);
 
-    std::vector<std::vector<double>> sys(2 * params.N,
-                                         std::vector<double>(2 * params.N));
+    Eigen::MatrixXd sys(2 * params.N, 2 * params.N);
 
     const double etaR = params.etaR;
     const double eta = params.eta;
@@ -44,6 +51,7 @@ void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
     const double gam = params.gam;
     const size_t N = params.N;
 
+    Eigen::VectorXd RHS(2 * params.N);
     for (size_t m = 0; m < params.N; ++m) {
         double temp[2] = {0.0, 0.0};
         for (size_t n = 0; n < params.N; ++n) {
@@ -53,6 +61,11 @@ void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
                 const double r = sqrt(d[0] * d[0] + d[1] * d[1]);
                 const double rbar = r * params.lam;
                 const double rbar2 = rbar * rbar;
+                const double rbar3 = rbar2 * rbar;
+                const double r2 = r * r;
+                const double r4 = r2 * r2;
+                const double r6 = r4 * r2;
+
                 const double bk[4] = {bessel_0(rbar), bessel_1(rbar),
                                       bessel_2(rbar), bessel_3(rbar)};
 
@@ -61,12 +74,12 @@ void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
                 {
                     double coeff1 =
                         (4 - rbar * rbar - 2 * rbar * rbar * bk[2]) /
-                        (2 * M_PI * lam * lam * pow(r, 4));
+                        (2 * M_PI * lam * lam * r4);
                     double coeff2 =
-                        (4 - 2 * rbar * rbar * bk[2] - pow(rbar, 3) * bk[1]) /
-                        (2 * M_PI * lam * lam * pow(r, 4));
-                    double coeff3 = (-8 + pow(rbar, 3) * bk[3]) /
-                                    (M_PI * lam * lam * pow(r, 6));
+                        (4 - 2 * rbar * rbar * bk[2] - rbar3 * bk[1]) /
+                        (2 * M_PI * lam * lam * r4);
+                    double coeff3 =
+                        (-8 + rbar3 * bk[3]) / (M_PI * lam * lam * r6);
 
                     for (int i = 0; i < 2; ++i) {
                         for (int j = 0; j < 2; ++j) {
@@ -99,7 +112,7 @@ void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
                         drds;
                     double coeff2 = (2 - rbar2 * bk[2]);
                     double coeff3 = (rbar2 * bk[1] * drds * lam);
-                    double coeff4 = coeff2 / (r * r);
+                    double coeff4 = coeff2 / (r2);
 
                     for (int i = 0; i < 2; ++i)
                         G_prime[i][i] =
@@ -112,19 +125,24 @@ void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
                                 coeff2 * (tangents[n][i] * d[j] +
                                           tangents[n][j] * d[i]) +
                                 (coeff3 - 4 * r * drds * coeff4) * d[i] * d[j];
-                            G_prime[i][j] /= 2 * M_PI * (eta + etaR) *
-                                             pow(r, 4) / pow(delta, 2);
+                            G_prime[i][j] /=
+                                2 * M_PI * (eta + etaR) * r4 / pow(delta, 2);
                         }
                     }
                 }
 
+                double term1[2][2] = {
+                    {-eta0 * G_prime[0][0], -eta0 * G_prime[0][1]},
+                    {-eta0 * G_prime[1][0], -eta0 * G_prime[1][1]}};
+                double term2[2][2] = {
+                    {-etaR * G_prime[0][1], etaR * G_prime[0][0]},
+                    {-etaR * G_prime[1][1], etaR * G_prime[1][0]}};
+
                 for (int i = 0; i < 2; ++i) {
                     for (int j = 0; j < 2; ++j) {
-                        sys[2 * m + i][2 * n + j] =
-                            -(L / N) * (M1[i][j] + M2[i][j]) -
-                            (L / N) * G_prime[i][j] * 2 *
-                                ((1 - eta0) * (i == j) +
-                                 etaR * (i != j) * (j > i ? 1 : -1));
+                        sys(2 * m + i, 2 * n + j) =
+                            -(L / N) * (M1[i][j] + M2[i][j] + 2 * term1[i][j] +
+                                        2 * term2[i][j]);
                     }
                 }
 
@@ -135,11 +153,16 @@ void inteqnsolve(param_t &params, dmat &positions, dmat &tangents,
             } else {
                 for (int i = 0; i < 2; ++i) {
                     for (int j = 0; j < 2; ++j)
-                        sys[2 * m + i][2 * n + j] = (i == j) * 0.5;
+                        sys(2 * m + i, 2 * n + j) = (i == j) * 0.5;
                 }
             }
         }
+        RHS(2 * m) = (L / N) * temp[0];
+        RHS(2 * m + 1) = (L / N) * temp[1];
     }
+
+    Eigen::GMRES<Eigen::MatrixXd> solver(sys);
+    return solver.solve(RHS);
 }
 
 double trapzp(dvec &a) {
@@ -170,15 +193,23 @@ dvec D(dvec &numer, dvec &denom) {
     double kdelta = 2 * M_PI / N / (denom[1] - denom[0]);
     for (int i = 0; i < N / 2 + 1; ++i) {
         double k = kdelta * i;
+        if (fabs(data[2 * i]) < 1E-5)
+            data[2 * i] = 0.0;
+        if (fabs(data[2 * i + 1]) < 1E-5)
+            data[2 * i + 1] = 0.0;
         std::swap(data[2 * i], data[2 * i + 1]);
         data[2 * i] *= -k;
-        data[2 * i + 1] *= -k;
+        data[2 * i + 1] *= k;
     }
     for (int i = N / 2 + 1; i < N; ++i) {
         double k = -0.5 * kdelta * N + kdelta * (i - N / 2 - 0.5);
+        if (fabs(data[2 * i]) < 1E-5)
+            data[2 * i] = 0.0;
+        if (fabs(data[2 * i + 1]) < 1E-5)
+            data[2 * i + 1] = 0.0;
         std::swap(data[2 * i], data[2 * i + 1]);
         data[2 * i] *= -k;
-        data[2 * i + 1] *= -k;
+        data[2 * i + 1] *= k;
     }
 
     gsl_fft_complex_inverse(data, 1, N, wt, work);
@@ -213,13 +244,11 @@ dvec D2(dvec &numer, dvec &denom) {
     double kdelta = 2 * M_PI / N / (denom[1] - denom[0]);
     for (int i = 0; i < N / 2 + 1; ++i) {
         double k = kdelta * i;
-        std::swap(data[2 * i], data[2 * i + 1]);
         data[2 * i] *= -k * k;
         data[2 * i + 1] *= -k * k;
     }
     for (int i = N / 2 + 1; i < N; ++i) {
         double k = -0.5 * kdelta * N + kdelta * (i - N / 2 - 0.5);
-        std::swap(data[2 * i], data[2 * i + 1]);
         data[2 * i] *= -k * k;
         data[2 * i + 1] *= -k * k;
     }
@@ -237,7 +266,7 @@ dvec D2(dvec &numer, dvec &denom) {
 
 dvec linspace(double a, double b, size_t N) {
     dvec res(N);
-    for (int i = 0; i < N; ++i)
+    for (size_t i = 0; i < N; ++i)
         res[i] = a + i * b / (N - 1);
 
     return res;
@@ -272,7 +301,7 @@ double func_to_zero(double x, void *params) {
 
 dvec cumtrapz(dvec &X, dvec &Y) {
     dvec res(X.size());
-    for (int i = 1; i < X.size(); ++i) {
+    for (size_t i = 1; i < X.size(); ++i) {
         double dx = 0.5 * (X[i] - X[i - 1]);
         res[i] = dx * (X[i - 1] + X[i]);
     }
@@ -307,7 +336,7 @@ int main(int argc, char *argv[]) {
     int mp = 4;       // perturbation mode
     dvec x(alpha.size());
     dvec y(alpha.size());
-    for (int i = 0; i < alpha.size(); ++i) {
+    for (size_t i = 0; i < alpha.size(); ++i) {
         x[i] = cos(alpha[i]) + eps * sin(mp * alpha[i]) * cos(alpha[i]);
         y[i] = sin(alpha[i]) + eps * sin(mp * alpha[i]) * sin(alpha[i]);
     }
@@ -317,7 +346,7 @@ int main(int argc, char *argv[]) {
     dvec dyda = D(y, alpha); // dy/d(alpha)
 
     dvec tmp(alpha.size());
-    for (int i = 0; i < dxda.size(); ++i) {
+    for (size_t i = 0; i < dxda.size(); ++i) {
         tmp[i] = sqrt(dxda[i] * dxda[i] + dyda[i] * dyda[i]);
     }
     double L_n = trapzp(tmp);
@@ -340,8 +369,7 @@ int main(int argc, char *argv[]) {
         gsl_root_fsolver_set(s, &F, 0, 10);
 
         double x0;
-
-        double result;
+        double result = 0;
         int status;
         do {
             status = gsl_root_fsolver_iterate(s);
@@ -357,13 +385,13 @@ int main(int argc, char *argv[]) {
 
     dvec x_i(params.N);
     dvec y_i(params.N);
-    for (int i = 0; i < params.N; ++i) {
+    for (size_t i = 0; i < params.N; ++i) {
         x_i[i] = cos(a_i[i]) + eps * sin(mp * a_i[i]) * cos(a_i[i]);
         y_i[i] = sin(a_i[i]) + eps * sin(mp * a_i[i]) * sin(a_i[i]);
     }
 
     dmat positions_n(params.N, dvec(2));
-    for (int i = 0; i < params.N; ++i) {
+    for (size_t i = 0; i < params.N; ++i) {
         positions_n[i][0] = x_i[i];
         positions_n[i][1] = y_i[i];
     }
@@ -374,44 +402,43 @@ int main(int argc, char *argv[]) {
     dvec y_ip = D(y_i, alpha);
     dvec y_ipp = D2(y_i, alpha);
     dmat tangents_n(params.N, dvec(2));
-    for (int i = 0; i < params.N; ++i) {
+    for (size_t i = 0; i < params.N; ++i) {
         tangents_n[i][0] = x_ip[i] * 2 * M_PI / L_n;
         tangents_n[i][1] = y_ip[i] * 2 * M_PI / L_n;
     }
 
     dmat normals_n(params.N, dvec(2));
-    for (int i = 0; i < params.N; ++i) {
+    for (size_t i = 0; i < params.N; ++i) {
         normals_n[i][0] = -y_ip[i] * 2 * M_PI / L_n;
         normals_n[i][1] = x_ip[i] * 2 * M_PI / L_n;
     }
 
     dvec kappa_n(params.N);
     double norm_factor = 0.0;
-    for (int i = 0; i < params.N; ++i)
+    for (size_t i = 0; i < params.N; ++i)
         norm_factor += pow(x_ip[i], 2) + pow(y_ip[i], 2);
     norm_factor = pow(norm_factor, -1.5);
-    for (int i = 0; i < params.N; ++i)
+    for (size_t i = 0; i < params.N; ++i)
         kappa_n[i] = norm_factor * (x_ip[i] * y_ipp[i] - y_ip[i] * x_ipp[i]);
 
     dvec theta_n = cumtrapz(alpha, kappa_n);
     double shift =
         2 * M_PI - L_n / (2 * M_PI) * trapzp(kappa_n) + atan2(y_ip[0], x_ip[0]);
 
-    for (int i = 0; i < theta_n.size(); ++i) {
+    for (size_t i = 0; i < params.N; ++i) {
         theta_n[i] = shift + L_n / (2 * M_PI) * theta_n[i];
     }
 
     dvec dthda_n(params.N);
-    for (int i = 0; i < params.N; ++i)
+    for (size_t i = 0; i < params.N; ++i)
         dthda_n[i] = L_n / (2 * M_PI) * kappa_n[i];
 
     tmp.resize(params.N);
-    for (int i = 0; i < params.N; ++i)
+    for (size_t i = 0; i < params.N; ++i)
         tmp[i] = pow(x_i[i], 2) + pow(y_i[i], 2);
     double area_n = 0.5 * trapzp(tmp);
 
     // -------- given curve, solve linear system for flow --------
-    dvec vel_prev(2 * params.N);
-    inteqnsolve(params, positions_n, tangents_n, normals_n, L_n, soltol,
-                vel_prev);
+    for (size_t i = 0; i < 1000; ++i)
+        inteqnsolve(params, positions_n, tangents_n, normals_n, L_n, soltol);
 }
