@@ -16,6 +16,8 @@
 
 #include "function_generator.hpp"
 
+#include <mat.h>
+
 typedef struct {
     double etaR;
     double eta;
@@ -168,7 +170,6 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
     }
 
     Eigen::GMRES<Eigen::MatrixXd> solver(sys);
-    // Eigen::ConjugateGradient<Eigen::MatrixXd> solver(sys);
     solver.setTolerance(soltol);
     return solver.solve(RHS);
 }
@@ -336,7 +337,7 @@ int main(int argc, char *argv[]) {
     params.N = pow(2, 7) - 1; // number of points on curve
     double dt = 0.001;
     double t = 0; // time
-    double t_max = 0.1;
+    double t_max = 10.0;
     double soltol = 1e-12;
 
     //// -------- initialize boundary (periodic BCs) ---------
@@ -477,11 +478,20 @@ int main(int argc, char *argv[]) {
     y_ipp = D2(y_i, alpha);
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
-
     t += dt;
 
     dvec uv_n = uv_np1;
 
+    int n_record = 100;
+    int i_step = 0;
+
+    MATFile *f_out = matOpen("alpha.mat", "w");
+    mxArray *alphaPtr = mxCreateDoubleMatrix(1, params.N, mxREAL);
+    memcpy((void *)(mxGetPr(alphaPtr)), alpha.data(),
+           params.N * sizeof(double));
+    matPutVariable(f_out, "alpha", alphaPtr);
+    mxDestroyArray(alphaPtr);
+    matClose(f_out);
     while (t < t_max) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
@@ -498,6 +508,7 @@ int main(int argc, char *argv[]) {
         double L_np2 = L_np1 - 0.5 * dt *
                                    (3 * trapzp(dthda_np1 * U_np1) -
                                     trapzp(dthda_n * U_n)); // AB2
+        // FIXME: Can cache the call to D(U_n, alpha)
         dvec theta_np2 =
             theta_np1 +
             0.5 * dt *
@@ -552,6 +563,32 @@ int main(int argc, char *argv[]) {
         theta_np1 = theta_np2;
         uv_np1 = uv_np2;
         t += dt;
+
+        i_step++;
+        if (i_step % n_record == 0) {
+            std::string outfile =
+                "test_" + std::to_string(i_step / n_record) + ".mat";
+            MATFile *f_out = matOpen(outfile.c_str(), "w");
+
+            mxArray *positionPtr = mxCreateDoubleMatrix(2, params.N, mxREAL);
+            memcpy((void *)(mxGetPr(positionPtr)), positions_np1.data(),
+                   2 * params.N * sizeof(double));
+            matPutVariable(f_out, "positions", positionPtr);
+            mxDestroyArray(positionPtr);
+
+            mxArray *thetaPtr = mxCreateDoubleMatrix(1, params.N, mxREAL);
+            memcpy((void *)(mxGetPr(thetaPtr)), theta_np1.data(),
+                   params.N * sizeof(double));
+            matPutVariable(f_out, "thetas", thetaPtr);
+            mxDestroyArray(thetaPtr);
+
+            mxArray *UPtr = mxCreateDoubleMatrix(1, params.N, mxREAL);
+            memcpy((void *)(mxGetPr(thetaPtr)), U_n.data(),
+                   params.N * sizeof(double));
+            matPutVariable(f_out, "U_n", UPtr);
+            mxDestroyArray(UPtr);
+            matClose(f_out);
+        }
     }
 
     return 0;
