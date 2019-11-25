@@ -9,6 +9,10 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <unsupported/Eigen/IterativeSolvers>
+//#include <Eigen/IterativeLinearSolvers>
+
+#include "vector/vectorclass.h"
+#include <boost/align/aligned_allocator.hpp>
 
 #include "function_generator.hpp"
 
@@ -20,18 +24,20 @@ typedef struct {
     double delta;
     double lam;
     double gam;
-    size_t N;
+    int N;
 } param_t;
 
-typedef std::vector<std::vector<double>> dmat;
-typedef std::vector<double> dvec;
+// typedef std::vector<double> dvec;
+typedef Eigen::ArrayXd dvec;
+typedef std::vector<Vec2d, boost::alignment::aligned_allocator<Vec2d, 128>>
+    vecvec;
 
 using std::cout;
 using std::endl;
 
-Eigen::VectorXd inteqnsolve(const param_t &params, const dmat &positions,
-                            const dmat &tangents, const dmat &normals,
-                            const double L, const double tol) {
+Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
+                            const vecvec &tangents, const vecvec &normals,
+                            const double L, const double soltol) {
     auto f_bk0 = [](double x) { return gsl_sf_bessel_Kn(0, x); };
     auto f_bk1 = [](double x) { return gsl_sf_bessel_Kn(1, x); };
     auto f_bk2 = [](double x) { return gsl_sf_bessel_Kn(2, x); };
@@ -49,15 +55,17 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const dmat &positions,
     const double lam = params.lam;
     const double delta = params.delta;
     const double gam = params.gam;
-    const size_t N = params.N;
+    const int N = params.N;
 
     Eigen::VectorXd RHS(2 * params.N);
-    for (size_t m = 0; m < params.N; ++m) {
+    const double fs_coeff = 0.5 / (M_PI * lam * lam);
+
+    for (int m = 0; m < params.N; ++m) {
         double temp[2] = {0.0, 0.0};
-        for (size_t n = 0; n < params.N; ++n) {
+        for (int n = 0; n < params.N; ++n) {
             if (m != n) {
-                const double d[2] = {positions[n][0] - positions[m][0],
-                                     positions[n][1] - positions[m][1]};
+                const Vec2d d = {positions[n][0] - positions[m][0],
+                                 positions[n][1] - positions[m][1]};
                 const double r = sqrt(d[0] * d[0] + d[1] * d[1]);
                 const double rbar = r * params.lam;
                 const double rbar2 = rbar * rbar;
@@ -72,14 +80,12 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const dmat &positions,
                 // FS_TRAC
                 double T[2][2][2];
                 {
-                    double coeff1 =
-                        (4 - rbar * rbar - 2 * rbar * rbar * bk[2]) /
-                        (2 * M_PI * lam * lam * r4);
-                    double coeff2 =
-                        (4 - 2 * rbar * rbar * bk[2] - rbar3 * bk[1]) /
-                        (2 * M_PI * lam * lam * r4);
-                    double coeff3 =
-                        (-8 + rbar3 * bk[3]) / (M_PI * lam * lam * r6);
+                    const double coeff1 =
+                        fs_coeff * (4 - rbar2 - 2 * rbar2 * bk[2]) / r4;
+                    const double coeff2 =
+                        fs_coeff * (4 - 2 * rbar2 * bk[2] - rbar3 * bk[1]) / r4;
+                    const double coeff3 =
+                        2 * fs_coeff * (-8 + rbar3 * bk[3]) / r6;
 
                     for (int i = 0; i < 2; ++i) {
                         for (int j = 0; j < 2; ++j) {
@@ -162,13 +168,13 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const dmat &positions,
     }
 
     Eigen::GMRES<Eigen::MatrixXd> solver(sys);
+    // Eigen::ConjugateGradient<Eigen::MatrixXd> solver(sys);
+    solver.setTolerance(soltol);
     return solver.solve(RHS);
 }
 
-double trapzp(dvec &a) {
-    double area = 0.0;
-    for (auto &y : a)
-        area += y;
+double trapzp(dvec a) {
+    double area = a.sum();
     return area * 2 * M_PI / a.size();
 }
 
@@ -264,9 +270,9 @@ dvec D2(dvec &numer, dvec &denom) {
     return res;
 }
 
-dvec linspace(double a, double b, size_t N) {
+dvec linspace(double a, double b, int N) {
     dvec res(N);
-    for (size_t i = 0; i < N; ++i)
+    for (int i = 0; i < N; ++i)
         res[i] = a + i * b / (N - 1);
 
     return res;
@@ -299,13 +305,18 @@ double func_to_zero(double x, void *params) {
     return ((double *)params)[2] - integrate(x, params);
 }
 
-dvec cumtrapz(dvec &X, dvec &Y) {
+dvec cumtrapz(dvec X, dvec Y) {
     dvec res(X.size());
-    for (size_t i = 1; i < X.size(); ++i) {
+    for (int i = 1; i < X.size(); ++i) {
         double dx = 0.5 * (X[i] - X[i - 1]);
-        res[i] = dx * (X[i - 1] + X[i]);
+        res[i] = res[i - 1] + dx * (Y[i - 1] + Y[i]);
     }
     return res;
+}
+
+void printVec(dvec &x) {
+    for (int i = 0; i < x.size(); ++i)
+        cout << x[i] << endl;
 }
 
 int main(int argc, char *argv[]) {
@@ -334,19 +345,15 @@ int main(int argc, char *argv[]) {
 
     double eps = 0.1; // perturbation amplitude
     int mp = 4;       // perturbation mode
-    dvec x(alpha.size());
-    dvec y(alpha.size());
-    for (size_t i = 0; i < alpha.size(); ++i) {
-        x[i] = cos(alpha[i]) + eps * sin(mp * alpha[i]) * cos(alpha[i]);
-        y[i] = sin(alpha[i]) + eps * sin(mp * alpha[i]) * sin(alpha[i]);
-    }
+    dvec x = alpha.cos() + eps * (mp * alpha).sin() * alpha.cos();
+    dvec y = alpha.sin() + eps * (mp * alpha).sin() * alpha.sin();
 
     //// -------- geometric quantities --------
     dvec dxda = D(x, alpha); // dx/d(alpha)
     dvec dyda = D(y, alpha); // dy/d(alpha)
 
     dvec tmp(alpha.size());
-    for (size_t i = 0; i < dxda.size(); ++i) {
+    for (int i = 0; i < dxda.size(); ++i) {
         tmp[i] = sqrt(dxda[i] * dxda[i] + dyda[i] * dyda[i]);
     }
     double L_n = trapzp(tmp);
@@ -355,7 +362,7 @@ int main(int argc, char *argv[]) {
 
     dvec a_i(params.N);
 
-    for (size_t i = 0; i < a_i.size(); ++i) {
+    for (int i = 0; i < a_i.size(); ++i) {
         double params[3] = {(double)mp, eps, s_i[i]};
 
         const gsl_root_fsolver_type *T;
@@ -385,15 +392,14 @@ int main(int argc, char *argv[]) {
 
     dvec x_i(params.N);
     dvec y_i(params.N);
-    for (size_t i = 0; i < params.N; ++i) {
+    for (int i = 0; i < params.N; ++i) {
         x_i[i] = cos(a_i[i]) + eps * sin(mp * a_i[i]) * cos(a_i[i]);
         y_i[i] = sin(a_i[i]) + eps * sin(mp * a_i[i]) * sin(a_i[i]);
     }
 
-    dmat positions_n(params.N, dvec(2));
-    for (size_t i = 0; i < params.N; ++i) {
-        positions_n[i][0] = x_i[i];
-        positions_n[i][1] = y_i[i];
+    vecvec positions_n(params.N);
+    for (int i = 0; i < params.N; ++i) {
+        positions_n[i] = {x_i[i], y_i[i]};
     }
 
     // -------- (x,y) -> (theta,L) --------
@@ -401,44 +407,152 @@ int main(int argc, char *argv[]) {
     dvec x_ipp = D2(x_i, alpha);
     dvec y_ip = D(y_i, alpha);
     dvec y_ipp = D2(y_i, alpha);
-    dmat tangents_n(params.N, dvec(2));
-    for (size_t i = 0; i < params.N; ++i) {
-        tangents_n[i][0] = x_ip[i] * 2 * M_PI / L_n;
-        tangents_n[i][1] = y_ip[i] * 2 * M_PI / L_n;
+    vecvec tangents_n(params.N);
+    for (int i = 0; i < params.N; ++i) {
+        tangents_n[i] = 2 * M_PI / L_n * Vec2d(x_ip[i], y_ip[i]);
     }
 
-    dmat normals_n(params.N, dvec(2));
-    for (size_t i = 0; i < params.N; ++i) {
-        normals_n[i][0] = -y_ip[i] * 2 * M_PI / L_n;
-        normals_n[i][1] = x_ip[i] * 2 * M_PI / L_n;
+    vecvec normals_n(params.N);
+    for (int i = 0; i < params.N; ++i) {
+        normals_n[i] = 2 * M_PI / L_n * Vec2d(-y_ip[i], x_ip[i]);
     }
 
-    dvec kappa_n(params.N);
-    double norm_factor = 0.0;
-    for (size_t i = 0; i < params.N; ++i)
-        norm_factor += pow(x_ip[i], 2) + pow(y_ip[i], 2);
-    norm_factor = pow(norm_factor, -1.5);
-    for (size_t i = 0; i < params.N; ++i)
-        kappa_n[i] = norm_factor * (x_ip[i] * y_ipp[i] - y_ip[i] * x_ipp[i]);
+    dvec kappa_n =
+        (x_ip * y_ipp - y_ip * x_ipp) / (x_ip * x_ip + y_ip * y_ip).pow(1.5);
 
-    dvec theta_n = cumtrapz(alpha, kappa_n);
-    double shift =
-        2 * M_PI - L_n / (2 * M_PI) * trapzp(kappa_n) + atan2(y_ip[0], x_ip[0]);
+    dvec theta_n = (L_n / (2 * M_PI)) * cumtrapz(alpha, kappa_n) +
+                   atan2(y_ip[0], x_ip[0]) + 2 * M_PI -
+                   L_n / (2 * M_PI) * trapzp(kappa_n);
 
-    for (size_t i = 0; i < params.N; ++i) {
-        theta_n[i] = shift + L_n / (2 * M_PI) * theta_n[i];
-    }
+    dvec dthda_n = L_n / (2 * M_PI) * kappa_n;
 
-    dvec dthda_n(params.N);
-    for (size_t i = 0; i < params.N; ++i)
-        dthda_n[i] = L_n / (2 * M_PI) * kappa_n[i];
-
-    tmp.resize(params.N);
-    for (size_t i = 0; i < params.N; ++i)
-        tmp[i] = pow(x_i[i], 2) + pow(y_i[i], 2);
-    double area_n = 0.5 * trapzp(tmp);
+    double area_n = 0.5 * trapzp(x_i * x_i + y_i * y_i);
 
     // -------- given curve, solve linear system for flow --------
-    for (size_t i = 0; i < 1000; ++i)
+    dvec uv_np1 =
         inteqnsolve(params, positions_n, tangents_n, normals_n, L_n, soltol);
+
+    dvec U_n = dvec(params.N).setZero();
+    for (int i = 0; i < params.N; ++i)
+        for (int j = 0; j < 2; ++j)
+            U_n[i] += normals_n[i][j] * uv_np1[2 * i + j];
+
+    dvec T_n = cumtrapz(alpha, dthda_n * U_n) -
+               trapzp(dthda_n * U_n) * alpha / (2 * M_PI);
+
+    // update theta and L (Euler forward for 1 step)
+    double L_np1 = L_n - dt * trapzp(dthda_n * U_n);
+    dvec theta_np1 =
+        theta_n + dt * (2 * M_PI / L_n) * (D(U_n, alpha) + dthda_n * T_n);
+
+    vecvec tangents_np1(params.N);
+    vecvec normals_np1(params.N);
+    for (int i = 0; i < params.N; ++i) {
+        tangents_np1[i] = {cos(theta_np1[i]), sin(theta_np1[i])};
+        normals_np1[i] = {-sin(theta_np1[i]), cos(theta_np1[i])};
+    }
+
+    // // update 1 point, then use (x,y) = integral of tangent
+    Vec2d X_np1 =
+        positions_n[0] + dt * U_n[0] * normals_n[0] + T_n[0] * tangents_n[0];
+    dvec x_np1 = X_np1[0] +
+                 L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.cos()) -
+                 L_np1 / (2 * M_PI) * trapzp(theta_np1.cos());
+    dvec y_np1 = X_np1[1] +
+                 L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.sin()) -
+                 L_np1 / (2 * M_PI) * trapzp(theta_np1.sin());
+
+    vecvec positions_np1(params.N);
+    for (int i = 0; i < params.N; ++i)
+        positions_np1[i] = {x_np1[i], y_np1[i]};
+
+    // conserved quantities
+    double area_np1 = 0.5 * trapzp(x_np1.square() +
+                                   y_np1.square()); // integral of r dr dtheta
+
+    // using new positions, compute new curvature and therefore
+    x_ip = D(x_i, alpha);
+    x_ipp = D2(x_i, alpha);
+    y_ip = D(y_i, alpha);
+    y_ipp = D2(y_i, alpha);
+    dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
+                     (x_ip.square() + y_ip.square()).pow(1.5);
+
+    t += dt;
+
+    dvec uv_n = uv_np1;
+
+    while (t < t_max) {
+        // compute U and T
+        dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
+                                  normals_np1, L_np1, soltol);
+        dvec U_np1 = dvec(params.N).setZero();
+        for (int i = 0; i < params.N; ++i)
+            for (int j = 0; j < 2; ++j)
+                U_np1[i] += normals_np1[i][j] * uv_np2[2 * i + j];
+
+        dvec T_np1 = cumtrapz(alpha, dthda_np1 * U_np1) -
+                     alpha / (2 * M_PI) * trapzp(dthda_np1 * U_np1);
+
+        // update theta and L
+        double L_np2 = L_np1 - 0.5 * dt *
+                                   (3 * trapzp(dthda_np1 * U_np1) -
+                                    trapzp(dthda_n * U_n)); // AB2
+        dvec theta_np2 =
+            theta_np1 +
+            0.5 * dt *
+                (3 * (2 * M_PI / L_np2) *
+                     (D(U_np1, alpha) + dthda_np1 * T_np1) -
+                 (2 * M_PI / L_np1) * (D(U_n, alpha) + dthda_n * T_n));
+
+        vecvec tangents_np2(params.N);
+        vecvec normals_np2(params.N);
+        for (int i = 0; i < params.N; ++i) {
+            tangents_np2[i] = {cos(theta_np2[i]), sin(theta_np2[i])};
+            normals_np2[i] = {-sin(theta_np2[i]), cos(theta_np2[i])};
+        }
+
+        // integrate tangent to get X(alpha)
+        Vec2d X_np2 = positions_np1[0] + 0.5 * dt *
+                                             (3 * U_np1[0] * normals_np2[0] -
+                                              U_n[0] * normals_np1[0]); // AB2
+        dvec x_np2 = X_np2[0] +
+                     L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.cos()) -
+                     L_np2 / (2 * M_PI) * trapzp(theta_np2.cos());
+        dvec y_np2 = X_np2[1] +
+                     L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.sin()) -
+                     L_np2 / (2 * M_PI) * trapzp(theta_np2.sin());
+
+        vecvec positions_np2(params.N);
+        for (int i = 0; i < params.N; ++i)
+            positions_np2[i] = {x_np2[i], y_np2[i]};
+
+        // conserved quantities
+        // integral of r dr dtheta
+        double area_np2 = 0.5 * trapzp(x_np2.square() + y_np2.square());
+
+        // calculate new curvature
+        x_ip = D(x_np2, alpha);
+        x_ipp = D2(x_np2, alpha);
+        y_ip = D(y_np2, alpha);
+        y_ipp = D2(y_np2, alpha);
+        dvec dthda_np2 = L_np2 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
+                         (x_ip.square() + y_ip.square()).pow(1.5);
+
+        // change n and n-1 timestep info
+        dthda_n = dthda_np1;
+        U_n = U_np1;
+        T_n = T_np1;
+        uv_n = uv_np2;
+        positions_np1 = positions_np2;
+        normals_np1 = normals_np2;
+        tangents_np1 = tangents_np2;
+        L_np1 = L_np2;
+        dthda_np1 = dthda_np2;
+        theta_np1 = theta_np2;
+        uv_np1 = uv_np2;
+        t += dt;
+    }
+
+    return 0;
 }
