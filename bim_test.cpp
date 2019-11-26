@@ -424,6 +424,39 @@ void printVec(dvec &x) {
         cout << x[i] << endl;
 }
 
+dvec find_zeros(double mp, double eps, dvec &s_i) {
+    dvec a_i(s_i.size());
+
+    for (int i = 0; i < s_i.size(); ++i) {
+        double params[3] = {(double)mp, eps, s_i[i]};
+
+        const gsl_root_fsolver_type *T;
+        gsl_root_fsolver *s;
+        gsl_function F;
+        F.function = func_to_zero;
+        F.params = params;
+
+        T = gsl_root_fsolver_brent;
+        s = gsl_root_fsolver_alloc(T);
+        gsl_root_fsolver_set(s, &F, 0, 10);
+
+        double x0;
+        double result = 0;
+        int status;
+        do {
+            status = gsl_root_fsolver_iterate(s);
+            x0 = result;
+            result = gsl_root_fsolver_root(s);
+            status = gsl_root_test_delta(result, x0, 0, 1e-5);
+        } while (status == GSL_CONTINUE);
+
+        gsl_root_fsolver_free(s);
+
+        a_i[i] = result;
+    }
+    return a_i;
+}
+
 int main(int argc, char *argv[]) {
     param_t params;
 
@@ -458,73 +491,32 @@ int main(int argc, char *argv[]) {
     dvec dxda = D(x, alpha); // dx/d(alpha)
     dvec dyda = D(y, alpha); // dy/d(alpha)
 
-    dvec tmp(alpha.size());
-    for (int i = 0; i < dxda.size(); ++i) {
-        tmp[i] = sqrt(dxda[i] * dxda[i] + dyda[i] * dyda[i]);
-    }
-    double L_n = trapzp(tmp);
+    double L_n = trapzp((dxda * dxda + dyda * dyda).sqrt());
     dvec s_i = linspace(0, L_n, params.N + 1);
     s_i.resize(params.N);
 
-    dvec a_i(params.N);
+    dvec a_i = find_zeros(mp, eps, s_i);
 
-    for (int i = 0; i < a_i.size(); ++i) {
-        double params[3] = {(double)mp, eps, s_i[i]};
-
-        const gsl_root_fsolver_type *T;
-        gsl_root_fsolver *s;
-        gsl_function F;
-        F.function = func_to_zero;
-        F.params = params;
-
-        T = gsl_root_fsolver_brent;
-        s = gsl_root_fsolver_alloc(T);
-        gsl_root_fsolver_set(s, &F, 0, 10);
-
-        double x0;
-        double result = 0;
-        int status;
-        do {
-            status = gsl_root_fsolver_iterate(s);
-            x0 = result;
-            result = gsl_root_fsolver_root(s);
-            status = gsl_root_test_delta(result, x0, 0, 1e-5);
-        } while (status == GSL_CONTINUE);
-
-        gsl_root_fsolver_free(s);
-
-        a_i[i] = result;
-    }
-
-    dvec x_i(params.N);
-    dvec y_i(params.N);
-    for (int i = 0; i < params.N; ++i) {
-        x_i[i] = cos(a_i[i]) + eps * sin(mp * a_i[i]) * cos(a_i[i]);
-        y_i[i] = sin(a_i[i]) + eps * sin(mp * a_i[i]) * sin(a_i[i]);
-    }
+    dvec x_i = a_i.cos() + eps * (mp * a_i).sin() * a_i.cos();
+    dvec y_i = a_i.sin() + eps * (mp * a_i).sin() * a_i.sin();
 
     vecvec positions_n(params.N, 2);
-    for (int i = 0; i < params.N; ++i) {
-        positions_n(i, 0) = x_i[i];
-        positions_n(i, 1) = y_i[i];
-    }
+    positions_n.col(0) = x_i;
+    positions_n.col(1) = y_i;
 
     // -------- (x,y) -> (theta,L) --------
     dvec x_ip = D(x_i, alpha);
     dvec x_ipp = D2(x_i, alpha);
     dvec y_ip = D(y_i, alpha);
     dvec y_ipp = D2(y_i, alpha);
+
     vecvec tangents_n(params.N, 2);
-    for (int i = 0; i < params.N; ++i) {
-        tangents_n(i, 0) = 2 * M_PI / L_n * x_ip[i];
-        tangents_n(i, 1) = 2 * M_PI / L_n * y_ip[i];
-    }
+    tangents_n.col(0) = x_ip;
+    tangents_n.col(1) = y_ip;
 
     vecvec normals_n(params.N, 2);
-    for (int i = 0; i < params.N; ++i) {
-        normals_n(i, 0) = 2 * M_PI / L_n * -y_ip[i];
-        normals_n(i, 1) = 2 * M_PI / L_n * x_ip[i];
-    }
+    normals_n.col(0) = -2 * M_PI / L_n * y_ip;
+    normals_n.col(1) = 2 * M_PI / L_n * x_ip;
 
     dvec kappa_n =
         (x_ip * y_ipp - y_ip * x_ipp) / (x_ip * x_ip + y_ip * y_ip).pow(1.5);
@@ -555,13 +547,12 @@ int main(int argc, char *argv[]) {
                                    (D(U_n, alpha) + dthda_n * T_n);
 
     vecvec tangents_np1(params.N, 2);
+    tangents_np1.col(0) = theta_np1.cos();
+    tangents_np1.col(1) = theta_np1.sin();
+
     vecvec normals_np1(params.N, 2);
-    for (int i = 0; i < params.N; ++i) {
-        tangents_np1(i, 0) = cos(theta_np1[i]);
-        tangents_np1(i, 1) = sin(theta_np1[i]);
-        normals_np1(i, 0) = -sin(theta_np1[i]);
-        normals_np1(i, 1) = cos(theta_np1[i]);
-    }
+    normals_np1.col(0) = -theta_np1.sin();
+    normals_np1.col(1) = theta_np1.cos();
 
     // // update 1 point, then use (x,y) = integral of tangent
     double X_np1[2] = {
@@ -577,10 +568,8 @@ int main(int argc, char *argv[]) {
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.sin());
 
     vecvec positions_np1(params.N, 2);
-    for (int i = 0; i < params.N; ++i) {
-        positions_np1(i, 0) = x_np1[i];
-        positions_np1(i, 1) = y_np1[i];
-    }
+    positions_np1.col(0) = x_np1;
+    positions_np1.col(1) = y_np1;
 
     // using new positions, compute new curvature and therefore
     x_ip = D(x_i, alpha);
@@ -623,13 +612,12 @@ int main(int argc, char *argv[]) {
                  (2 * M_PI / L_np1) * (D(U_n, alpha) + dthda_n * T_n));
 
         vecvec tangents_np2(params.N, 2);
+        tangents_np2.col(0) = theta_np2.cos();
+        tangents_np2.col(1) = theta_np2.sin();
+
         vecvec normals_np2(params.N, 2);
-        for (int i = 0; i < params.N; ++i) {
-            tangents_np2(i, 0) = cos(theta_np2[i]);
-            tangents_np2(i, 1) = sin(theta_np2[i]);
-            normals_np2(i, 0) = -sin(theta_np2[i]);
-            normals_np2(i, 1) = cos(theta_np2[i]);
-        }
+        normals_np2.col(0) = -theta_np2.sin();
+        normals_np2.col(1) = theta_np2.cos();
 
         // integrate tangent to get X(alpha)
         double X_np2[2] = {
@@ -647,10 +635,8 @@ int main(int argc, char *argv[]) {
                      L_np2 / (2 * M_PI) * trapzp(theta_np2.sin());
 
         vecvec positions_np2(params.N, 2);
-        for (int i = 0; i < params.N; ++i) {
-            positions_np2(i, 0) = x_np2[i];
-            positions_np2(i, 1) = y_np2[i];
-        }
+        positions_np2.col(0) = x_np2;
+        positions_np2.col(1) = y_np2;
 
         // calculate new curvature
         x_ip = D(x_np2, alpha);
