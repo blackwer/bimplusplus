@@ -16,7 +16,7 @@
 
 #include "function_generator.hpp"
 
-#include <mat.h>
+#include <hdf5.h>
 
 typedef struct {
     double etaR;
@@ -26,7 +26,9 @@ typedef struct {
     double delta;
     double lam;
     double gam;
+    double dt;
     int N;
+    int n_record;
 } param_t;
 
 // typedef std::vector<double> dvec;
@@ -177,6 +179,111 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
 double trapzp(dvec a) {
     double area = a.sum();
     return area * 2 * M_PI / a.size();
+}
+
+void writeH5(hid_t fid, std::string path, std::vector<vecvec> time_data) {
+    hsize_t dims[3] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].size(),
+                       2};
+    hid_t dataspace_id = H5Screate_simple(3, dims, NULL);
+    hid_t dataset_id =
+        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    std::vector<double> flattened(time_data.size() * time_data[0].size() * 2);
+
+    long int offset = 0;
+    for (auto &arr : time_data) {
+        for (int i = 0; i < arr.size(); ++i) {
+            flattened[2 * i + offset] = arr[i][0];
+            flattened[2 * i + 1 + offset] = arr[i][1];
+        }
+        offset += 2 * arr.size();
+    }
+
+    H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+             flattened.data());
+
+    /* End access to the dataset and release resources used by it. */
+    H5Dclose(dataset_id);
+
+    /* Terminate access to the data space. */
+    H5Sclose(dataspace_id);
+}
+
+void writeH5(hid_t fid, std::string path, std::vector<dvec> time_data) {
+    hsize_t dims[2] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].size()};
+    hid_t dataspace_id = H5Screate_simple(2, dims, NULL);
+    hid_t dataset_id =
+        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    std::vector<double> flattened(time_data.size() * time_data[0].size());
+
+    long int offset = 0;
+    for (auto &arr : time_data) {
+        for (int i = 0; i < arr.size(); ++i)
+            flattened[i + offset] = arr[i];
+        offset += arr.size();
+    }
+
+    H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+             flattened.data());
+
+    /* End access to the dataset and release resources used by it. */
+    H5Dclose(dataset_id);
+
+    /* Terminate access to the data space. */
+    H5Sclose(dataspace_id);
+}
+
+void writeH5(hid_t fid, std::string path, dvec arr) {
+    hsize_t dims[1] = {(hsize_t)arr.size()};
+    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+    hid_t dataset_id =
+        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+             arr.data());
+
+    /* End access to the dataset and release resources used by it. */
+    H5Dclose(dataset_id);
+
+    /* Terminate access to the data space. */
+    H5Sclose(dataspace_id);
+}
+
+void writeH5(hid_t fid, std::string path, double val) {
+    hsize_t dims[1] = {1};
+    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+    hid_t dataset_id =
+        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+             &val);
+
+    /* End access to the dataset and release resources used by it. */
+    H5Dclose(dataset_id);
+
+    /* Terminate access to the data space. */
+    H5Sclose(dataspace_id);
+}
+
+void writeH5(hid_t fid, std::string path, int val) {
+    hsize_t dims[1] = {1};
+    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+    hid_t dataset_id =
+        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_INT, dataspace_id, H5P_DEFAULT,
+                   H5P_DEFAULT, H5P_DEFAULT);
+
+    H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &val);
+
+    /* End access to the dataset and release resources used by it. */
+    H5Dclose(dataset_id);
+
+    /* Terminate access to the data space. */
+    H5Sclose(dataspace_id);
 }
 
 dvec D(dvec &numer, dvec &denom) {
@@ -331,11 +438,12 @@ int main(int argc, char *argv[]) {
     params.delta =
         sqrt((params.eta + params.etaR) / params.G); // BL length scale
     params.lam = 1.0 / params.delta;
-    params.gam = 0.01; // line tension (little gamma)
+    params.gam = 0.01;     // line tension (little gamma)
+    params.n_record = 100; // Number of timesteps between output
 
     //// -------- numerical parameters --------
     params.N = pow(2, 7) - 1; // number of points on curve
-    double dt = 0.001;
+    params.dt = 0.001;
     double t = 0; // time
     double t_max = 10.0;
     double soltol = 1e-12;
@@ -442,9 +550,9 @@ int main(int argc, char *argv[]) {
                trapzp(dthda_n * U_n) * alpha / (2 * M_PI);
 
     // update theta and L (Euler forward for 1 step)
-    double L_np1 = L_n - dt * trapzp(dthda_n * U_n);
-    dvec theta_np1 =
-        theta_n + dt * (2 * M_PI / L_n) * (D(U_n, alpha) + dthda_n * T_n);
+    double L_np1 = L_n - params.dt * trapzp(dthda_n * U_n);
+    dvec theta_np1 = theta_n + params.dt * (2 * M_PI / L_n) *
+                                   (D(U_n, alpha) + dthda_n * T_n);
 
     vecvec tangents_np1(params.N);
     vecvec normals_np1(params.N);
@@ -454,8 +562,8 @@ int main(int argc, char *argv[]) {
     }
 
     // // update 1 point, then use (x,y) = integral of tangent
-    Vec2d X_np1 =
-        positions_n[0] + dt * U_n[0] * normals_n[0] + T_n[0] * tangents_n[0];
+    Vec2d X_np1 = positions_n[0] + params.dt * U_n[0] * normals_n[0] +
+                  T_n[0] * tangents_n[0];
     dvec x_np1 = X_np1[0] +
                  L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.cos()) -
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.cos());
@@ -467,10 +575,6 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < params.N; ++i)
         positions_np1[i] = {x_np1[i], y_np1[i]};
 
-    // conserved quantities
-    double area_np1 = 0.5 * trapzp(x_np1.square() +
-                                   y_np1.square()); // integral of r dr dtheta
-
     // using new positions, compute new curvature and therefore
     x_ip = D(x_i, alpha);
     x_ipp = D2(x_i, alpha);
@@ -478,20 +582,15 @@ int main(int argc, char *argv[]) {
     y_ipp = D2(y_i, alpha);
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
-    t += dt;
+    t += params.dt;
 
     dvec uv_n = uv_np1;
 
-    int n_record = 100;
     int i_step = 0;
 
-    MATFile *f_out = matOpen("alpha.mat", "w");
-    mxArray *alphaPtr = mxCreateDoubleMatrix(1, params.N, mxREAL);
-    memcpy((void *)(mxGetPr(alphaPtr)), alpha.data(),
-           params.N * sizeof(double));
-    matPutVariable(f_out, "alpha", alphaPtr);
-    mxDestroyArray(alphaPtr);
-    matClose(f_out);
+    std::vector<dvec> theta_t;
+    std::vector<dvec> U_t;
+    std::vector<vecvec> positions_t;
     while (t < t_max) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
@@ -505,13 +604,13 @@ int main(int argc, char *argv[]) {
                      alpha / (2 * M_PI) * trapzp(dthda_np1 * U_np1);
 
         // update theta and L
-        double L_np2 = L_np1 - 0.5 * dt *
+        double L_np2 = L_np1 - 0.5 * params.dt *
                                    (3 * trapzp(dthda_np1 * U_np1) -
                                     trapzp(dthda_n * U_n)); // AB2
         // FIXME: Can cache the call to D(U_n, alpha)
         dvec theta_np2 =
             theta_np1 +
-            0.5 * dt *
+            0.5 * params.dt *
                 (3 * (2 * M_PI / L_np2) *
                      (D(U_np1, alpha) + dthda_np1 * T_np1) -
                  (2 * M_PI / L_np1) * (D(U_n, alpha) + dthda_n * T_n));
@@ -524,7 +623,7 @@ int main(int argc, char *argv[]) {
         }
 
         // integrate tangent to get X(alpha)
-        Vec2d X_np2 = positions_np1[0] + 0.5 * dt *
+        Vec2d X_np2 = positions_np1[0] + 0.5 * params.dt *
                                              (3 * U_np1[0] * normals_np2[0] -
                                               U_n[0] * normals_np1[0]); // AB2
         dvec x_np2 = X_np2[0] +
@@ -537,10 +636,6 @@ int main(int argc, char *argv[]) {
         vecvec positions_np2(params.N);
         for (int i = 0; i < params.N; ++i)
             positions_np2[i] = {x_np2[i], y_np2[i]};
-
-        // conserved quantities
-        // integral of r dr dtheta
-        double area_np2 = 0.5 * trapzp(x_np2.square() + y_np2.square());
 
         // calculate new curvature
         x_ip = D(x_np2, alpha);
@@ -562,34 +657,31 @@ int main(int argc, char *argv[]) {
         dthda_np1 = dthda_np2;
         theta_np1 = theta_np2;
         uv_np1 = uv_np2;
-        t += dt;
+        t += params.dt;
 
         i_step++;
-        if (i_step % n_record == 0) {
-            std::string outfile =
-                "test_" + std::to_string(i_step / n_record) + ".mat";
-            MATFile *f_out = matOpen(outfile.c_str(), "w");
-
-            mxArray *positionPtr = mxCreateDoubleMatrix(2, params.N, mxREAL);
-            memcpy((void *)(mxGetPr(positionPtr)), positions_np1.data(),
-                   2 * params.N * sizeof(double));
-            matPutVariable(f_out, "positions", positionPtr);
-            mxDestroyArray(positionPtr);
-
-            mxArray *thetaPtr = mxCreateDoubleMatrix(1, params.N, mxREAL);
-            memcpy((void *)(mxGetPr(thetaPtr)), theta_np1.data(),
-                   params.N * sizeof(double));
-            matPutVariable(f_out, "thetas", thetaPtr);
-            mxDestroyArray(thetaPtr);
-
-            mxArray *UPtr = mxCreateDoubleMatrix(1, params.N, mxREAL);
-            memcpy((void *)(mxGetPr(thetaPtr)), U_n.data(),
-                   params.N * sizeof(double));
-            matPutVariable(f_out, "U_n", UPtr);
-            mxDestroyArray(UPtr);
-            matClose(f_out);
+        if (i_step % params.n_record == 0) {
+            positions_t.push_back(positions_np1);
+            theta_t.push_back(theta_np1);
+            U_t.push_back(U_np1);
         }
     }
+
+    hid_t file_id =
+        H5Fcreate("test.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    writeH5(file_id, "/alpha", alpha);
+    writeH5(file_id, "/theta_t", theta_t);
+    writeH5(file_id, "/U_t", U_t);
+    writeH5(file_id, "/positions_t", positions_t);
+    writeH5(file_id, "/area_n", area_n);
+    writeH5(file_id, "/etaR", params.etaR);
+    writeH5(file_id, "/eta", params.eta);
+    writeH5(file_id, "/eta0", params.eta0);
+    writeH5(file_id, "/G", params.G);
+    writeH5(file_id, "/dt", params.dt);
+    writeH5(file_id, "/n_record", params.n_record);
+
+    H5Fclose(file_id);
 
     return 0;
 }

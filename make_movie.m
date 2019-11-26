@@ -1,7 +1,5 @@
 function [] = make_movie(filename)
 %MAKE_MOVIE Make a movie from bim_test data
-load('alpha.mat', 'alpha')
-
 window_x=1.2;
 window_y=1.2;
 
@@ -12,14 +10,24 @@ VW = VideoWriter([filename '.avi']);
 VW.FrameRate = 30;
 open(VW);
 
-for i = 1:99
-    fname = 'test_' + string(i) + '.mat';
-    load(fname, 'positions', 'thetas', 'U_n');
-    t = 100*0.001*i;
+positions_t = h5read('test.h5', '/positions_t');
+theta_t = h5read('test.h5', '/theta_t');
+U_t = h5read('test.h5', '/U_t');
+alpha = h5read('test.h5', '/alpha')';
+area_n = h5read('test.h5', '/area_n');
+n_record = h5read('test.h5', '/n_record');
+dt = h5read('test.h5', '/dt');
+
+n_frames = size(U_t, 2);
+for i = 1:n_frames
+    t = double(n_record*i)*dt;
+
+    positions = positions_t(:, :, i);
+    thetas = theta_t(:, i)';
+    U_n = U_t(:, i)';
     
     %% update theta and L
     normals = [-sin(thetas); cos(thetas)];
-    area_n = 3.186673437718255;
     
     %% conserved quantities
     area_np2 = 0.5*trapzp(positions(1,:).^2+positions(2,:).^2, length(alpha)); % integral of r dr dtheta
