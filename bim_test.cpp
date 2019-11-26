@@ -11,9 +11,6 @@
 #include <unsupported/Eigen/IterativeSolvers>
 //#include <Eigen/IterativeLinearSolvers>
 
-#include "vector/vectorclass.h"
-#include <boost/align/aligned_allocator.hpp>
-
 #include "function_generator.hpp"
 
 #include <hdf5.h>
@@ -33,8 +30,7 @@ typedef struct {
 
 // typedef std::vector<double> dvec;
 typedef Eigen::ArrayXd dvec;
-typedef std::vector<Vec2d, boost::alignment::aligned_allocator<Vec2d, 128>>
-    vecvec;
+typedef Eigen::ArrayXXd vecvec;
 
 using std::cout;
 using std::endl;
@@ -68,8 +64,8 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
         double temp[2] = {0.0, 0.0};
         for (int n = 0; n < params.N; ++n) {
             if (m != n) {
-                const Vec2d d = {positions[n][0] - positions[m][0],
-                                 positions[n][1] - positions[m][1]};
+                const double d[2] = {positions(n, 0) - positions(m, 0),
+                                     positions(n, 1) - positions(m, 1)};
                 const double r = sqrt(d[0] * d[0] + d[1] * d[1]);
                 const double rbar = r * params.lam;
                 const double rbar2 = rbar * rbar;
@@ -104,17 +100,17 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
                     }
                 }
                 double M1[2][2] = {
-                    {normals[n][0] * T[0][0][0], normals[n][0] * T[1][0][0]},
-                    {normals[n][0] * T[0][0][1], normals[n][0] * T[1][0][1]}};
+                    {normals(n, 0) * T[0][0][0], normals(n, 0) * T[1][0][0]},
+                    {normals(n, 0) * T[0][0][1], normals(n, 0) * T[1][0][1]}};
                 double M2[2][2] = {
-                    {normals[n][1] * T[0][1][0], normals[n][1] * T[1][1][0]},
-                    {normals[n][1] * T[0][1][1], normals[n][1] * T[1][1][1]}};
+                    {normals(n, 1) * T[0][1][0], normals(n, 1) * T[1][1][0]},
+                    {normals(n, 1) * T[0][1][1], normals(n, 1) * T[1][1][1]}};
 
                 // fs_vel_p
                 double G_prime[2][2] = {{0}};
                 {
                     double drds =
-                        (tangents[n][0] * d[0] + tangents[n][1] * d[1]) / r;
+                        (tangents(n, 0) * d[0] + tangents(n, 1) * d[1]) / r;
 
                     double coeff1 =
                         (2 * r * (-1 + rbar * bk[1] + rbar2 * bk[0]) +
@@ -132,8 +128,8 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
                     for (int i = 0; i < 2; ++i) {
                         for (int j = 0; j < 2; ++j) {
                             G_prime[i][j] +=
-                                coeff2 * (tangents[n][i] * d[j] +
-                                          tangents[n][j] * d[i]) +
+                                coeff2 * (tangents(n, i) * d[j] +
+                                          tangents(n, j) * d[i]) +
                                 (coeff3 - 4 * r * drds * coeff4) * d[i] * d[j];
                             G_prime[i][j] /=
                                 2 * M_PI * (eta + etaR) * r4 / pow(delta, 2);
@@ -158,8 +154,8 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
 
                 for (int i = 0; i < 2; ++i)
                     for (int j = 0; j < 2; ++j)
-                        temp[i] -= G_prime[i][j] * (etaR * positions[n][j] +
-                                                    gam * tangents[n][j]);
+                        temp[i] -= G_prime[i][j] * (etaR * positions(n, j) +
+                                                    gam * tangents(n, j));
             } else {
                 for (int i = 0; i < 2; ++i) {
                     for (int j = 0; j < 2; ++j)
@@ -182,22 +178,23 @@ double trapzp(dvec a) {
 }
 
 void writeH5(hid_t fid, std::string path, std::vector<vecvec> time_data) {
-    hsize_t dims[3] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].size(),
-                       2};
+    hsize_t dims[3] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].rows(),
+                       (hsize_t)time_data[0].cols()};
     hid_t dataspace_id = H5Screate_simple(3, dims, NULL);
     hid_t dataset_id =
         H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
                    H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-    std::vector<double> flattened(time_data.size() * time_data[0].size() * 2);
+    std::vector<double> flattened(time_data.size() * time_data[0].rows() *
+                                  time_data[0].cols());
 
     long int offset = 0;
     for (auto &arr : time_data) {
-        for (int i = 0; i < arr.size(); ++i) {
-            flattened[2 * i + offset] = arr[i][0];
-            flattened[2 * i + 1 + offset] = arr[i][1];
+        for (int i = 0; i < arr.rows(); ++i) {
+            for (int j = 0; j < arr.cols(); ++j)
+                flattened[arr.cols() * i + j + offset] = arr(i, j);
         }
-        offset += 2 * arr.size();
+        offset += arr.rows() * arr.cols();
     }
 
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
@@ -506,9 +503,10 @@ int main(int argc, char *argv[]) {
         y_i[i] = sin(a_i[i]) + eps * sin(mp * a_i[i]) * sin(a_i[i]);
     }
 
-    vecvec positions_n(params.N);
+    vecvec positions_n(params.N, 2);
     for (int i = 0; i < params.N; ++i) {
-        positions_n[i] = {x_i[i], y_i[i]};
+        positions_n(i, 0) = x_i[i];
+        positions_n(i, 1) = y_i[i];
     }
 
     // -------- (x,y) -> (theta,L) --------
@@ -516,14 +514,16 @@ int main(int argc, char *argv[]) {
     dvec x_ipp = D2(x_i, alpha);
     dvec y_ip = D(y_i, alpha);
     dvec y_ipp = D2(y_i, alpha);
-    vecvec tangents_n(params.N);
+    vecvec tangents_n(params.N, 2);
     for (int i = 0; i < params.N; ++i) {
-        tangents_n[i] = 2 * M_PI / L_n * Vec2d(x_ip[i], y_ip[i]);
+        tangents_n(i, 0) = 2 * M_PI / L_n * x_ip[i];
+        tangents_n(i, 1) = 2 * M_PI / L_n * y_ip[i];
     }
 
-    vecvec normals_n(params.N);
+    vecvec normals_n(params.N, 2);
     for (int i = 0; i < params.N; ++i) {
-        normals_n[i] = 2 * M_PI / L_n * Vec2d(-y_ip[i], x_ip[i]);
+        normals_n(i, 0) = 2 * M_PI / L_n * -y_ip[i];
+        normals_n(i, 1) = 2 * M_PI / L_n * x_ip[i];
     }
 
     dvec kappa_n =
@@ -544,7 +544,7 @@ int main(int argc, char *argv[]) {
     dvec U_n = dvec(params.N).setZero();
     for (int i = 0; i < params.N; ++i)
         for (int j = 0; j < 2; ++j)
-            U_n[i] += normals_n[i][j] * uv_np1[2 * i + j];
+            U_n[i] += normals_n(i, j) * uv_np1[2 * i + j];
 
     dvec T_n = cumtrapz(alpha, dthda_n * U_n) -
                trapzp(dthda_n * U_n) * alpha / (2 * M_PI);
@@ -554,16 +554,21 @@ int main(int argc, char *argv[]) {
     dvec theta_np1 = theta_n + params.dt * (2 * M_PI / L_n) *
                                    (D(U_n, alpha) + dthda_n * T_n);
 
-    vecvec tangents_np1(params.N);
-    vecvec normals_np1(params.N);
+    vecvec tangents_np1(params.N, 2);
+    vecvec normals_np1(params.N, 2);
     for (int i = 0; i < params.N; ++i) {
-        tangents_np1[i] = {cos(theta_np1[i]), sin(theta_np1[i])};
-        normals_np1[i] = {-sin(theta_np1[i]), cos(theta_np1[i])};
+        tangents_np1(i, 0) = cos(theta_np1[i]);
+        tangents_np1(i, 1) = sin(theta_np1[i]);
+        normals_np1(i, 0) = -sin(theta_np1[i]);
+        normals_np1(i, 1) = cos(theta_np1[i]);
     }
 
     // // update 1 point, then use (x,y) = integral of tangent
-    Vec2d X_np1 = positions_n[0] + params.dt * U_n[0] * normals_n[0] +
-                  T_n[0] * tangents_n[0];
+    double X_np1[2] = {
+        positions_n(0, 0) + params.dt * U_n[0] * normals_n(0, 0) +
+            T_n[0] * tangents_n(0, 0),
+        positions_n(0, 1) + params.dt * U_n[0] * normals_n(0, 1) +
+            T_n[0] * tangents_n(0, 1)};
     dvec x_np1 = X_np1[0] +
                  L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.cos()) -
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.cos());
@@ -571,9 +576,11 @@ int main(int argc, char *argv[]) {
                  L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.sin()) -
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.sin());
 
-    vecvec positions_np1(params.N);
-    for (int i = 0; i < params.N; ++i)
-        positions_np1[i] = {x_np1[i], y_np1[i]};
+    vecvec positions_np1(params.N, 2);
+    for (int i = 0; i < params.N; ++i) {
+        positions_np1(i, 0) = x_np1[i];
+        positions_np1(i, 1) = y_np1[i];
+    }
 
     // using new positions, compute new curvature and therefore
     x_ip = D(x_i, alpha);
@@ -598,7 +605,7 @@ int main(int argc, char *argv[]) {
         dvec U_np1 = dvec(params.N).setZero();
         for (int i = 0; i < params.N; ++i)
             for (int j = 0; j < 2; ++j)
-                U_np1[i] += normals_np1[i][j] * uv_np2[2 * i + j];
+                U_np1[i] += normals_np1(i, j) * uv_np2[2 * i + j];
 
         dvec T_np1 = cumtrapz(alpha, dthda_np1 * U_np1) -
                      alpha / (2 * M_PI) * trapzp(dthda_np1 * U_np1);
@@ -615,17 +622,23 @@ int main(int argc, char *argv[]) {
                      (D(U_np1, alpha) + dthda_np1 * T_np1) -
                  (2 * M_PI / L_np1) * (D(U_n, alpha) + dthda_n * T_n));
 
-        vecvec tangents_np2(params.N);
-        vecvec normals_np2(params.N);
+        vecvec tangents_np2(params.N, 2);
+        vecvec normals_np2(params.N, 2);
         for (int i = 0; i < params.N; ++i) {
-            tangents_np2[i] = {cos(theta_np2[i]), sin(theta_np2[i])};
-            normals_np2[i] = {-sin(theta_np2[i]), cos(theta_np2[i])};
+            tangents_np2(i, 0) = cos(theta_np2[i]);
+            tangents_np2(i, 1) = sin(theta_np2[i]);
+            normals_np2(i, 0) = -sin(theta_np2[i]);
+            normals_np2(i, 1) = cos(theta_np2[i]);
         }
 
         // integrate tangent to get X(alpha)
-        Vec2d X_np2 = positions_np1[0] + 0.5 * params.dt *
-                                             (3 * U_np1[0] * normals_np2[0] -
-                                              U_n[0] * normals_np1[0]); // AB2
+        double X_np2[2] = {
+            positions_np1(0, 0) + 0.5 * params.dt *
+                                      (3 * U_np1[0] * normals_np2(0, 0) -
+                                       U_n[0] * normals_np1(0, 0)),
+            positions_np1(0, 1) + 0.5 * params.dt *
+                                      (3 * U_np1[0] * normals_np2(0, 1) -
+                                       U_n[0] * normals_np1(0, 1))};
         dvec x_np2 = X_np2[0] +
                      L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.cos()) -
                      L_np2 / (2 * M_PI) * trapzp(theta_np2.cos());
@@ -633,9 +646,11 @@ int main(int argc, char *argv[]) {
                      L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.sin()) -
                      L_np2 / (2 * M_PI) * trapzp(theta_np2.sin());
 
-        vecvec positions_np2(params.N);
-        for (int i = 0; i < params.N; ++i)
-            positions_np2[i] = {x_np2[i], y_np2[i]};
+        vecvec positions_np2(params.N, 2);
+        for (int i = 0; i < params.N; ++i) {
+            positions_np2(i, 0) = x_np2[i];
+            positions_np2(i, 1) = y_np2[i];
+        }
 
         // calculate new curvature
         x_ip = D(x_np2, alpha);
