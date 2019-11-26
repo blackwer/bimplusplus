@@ -531,8 +531,8 @@ int main(int argc, char *argv[]) {
     double area_n = 0.5 * trapzp(x_i * x_i + y_i * y_i);
 
     // -------- given curve, solve linear system for flow --------
-    dvec uv_np1 =
-        inteqnsolve(params, positions_n, tangents_n, normals_n, L_n, params.soltol);
+    dvec uv_np1 = inteqnsolve(params, positions_n, tangents_n, normals_n, L_n,
+                              params.soltol);
 
     dvec U_n = dvec(params.N).setZero();
     for (int i = 0; i < params.N; ++i)
@@ -588,6 +588,7 @@ int main(int argc, char *argv[]) {
     std::vector<dvec> theta_t;
     std::vector<dvec> U_t;
     std::vector<vecvec> positions_t;
+    dvec D_U_last = D(U_n, alpha);
     while (t < t_max) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
@@ -604,13 +605,14 @@ int main(int argc, char *argv[]) {
         double L_np2 = L_np1 - 0.5 * params.dt *
                                    (3 * trapzp(dthda_np1 * U_np1) -
                                     trapzp(dthda_n * U_n)); // AB2
+
         // FIXME: Can cache the call to D(U_n, alpha)
+        dvec D_U_np1 = D(U_np1, alpha);
         dvec theta_np2 =
             theta_np1 +
             0.5 * params.dt *
-                (3 * (2 * M_PI / L_np2) *
-                     (D(U_np1, alpha) + dthda_np1 * T_np1) -
-                 (2 * M_PI / L_np1) * (D(U_n, alpha) + dthda_n * T_n));
+                (3 * (2 * M_PI / L_np2) * (D_U_np1 + dthda_np1 * T_np1) -
+                 (2 * M_PI / L_np1) * (D_U_last + dthda_n * T_n));
 
         vecvec tangents_np2(params.N, 2);
         tangents_np2.col(0) = theta_np2.cos();
@@ -659,6 +661,8 @@ int main(int argc, char *argv[]) {
         dthda_np1 = dthda_np2;
         theta_np1 = theta_np2;
         uv_np1 = uv_np2;
+        D_U_last = D_U_np1;
+
         t += params.dt;
 
         i_step++;
