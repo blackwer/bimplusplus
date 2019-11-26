@@ -24,6 +24,7 @@ typedef struct {
     double lam;
     double gam;
     double dt;
+    double soltol;
     int N;
     int n_record;
 } param_t;
@@ -476,7 +477,7 @@ int main(int argc, char *argv[]) {
     params.dt = 0.001;
     double t = 0; // time
     double t_max = 10.0;
-    double soltol = 1e-12;
+    params.soltol = 1e-12;
 
     //// -------- initialize boundary (periodic BCs) ---------
     dvec alpha = linspace(0, 2 * M_PI, params.N + 1);
@@ -531,7 +532,7 @@ int main(int argc, char *argv[]) {
 
     // -------- given curve, solve linear system for flow --------
     dvec uv_np1 =
-        inteqnsolve(params, positions_n, tangents_n, normals_n, L_n, soltol);
+        inteqnsolve(params, positions_n, tangents_n, normals_n, L_n, params.soltol);
 
     dvec U_n = dvec(params.N).setZero();
     for (int i = 0; i < params.N; ++i)
@@ -590,7 +591,7 @@ int main(int argc, char *argv[]) {
     while (t < t_max) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
-                                  normals_np1, L_np1, soltol);
+                                  normals_np1, L_np1, params.soltol);
         dvec U_np1 = dvec(params.N).setZero();
         for (int i = 0; i < params.N; ++i)
             for (int j = 0; j < 2; ++j)
