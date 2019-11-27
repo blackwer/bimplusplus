@@ -34,13 +34,13 @@ typedef struct {
 
 // typedef std::vector<double> dvec;
 typedef Eigen::ArrayXd dvec;
-typedef Eigen::ArrayXXd vecvec;
+typedef Eigen::ArrayXXd dvecvec;
 
 using std::cout;
 using std::endl;
 
-Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
-                            const vecvec &tangents, const vecvec &normals,
+dvec inteqnsolve(const param_t &params, const dvecvec &positions,
+                            const dvecvec &tangents, const dvecvec &normals,
                             const double L, const double soltol) {
     auto f_bk0 = [](double x) { return gsl_sf_bessel_Kn(0, x); };
     auto f_bk1 = [](double x) { return gsl_sf_bessel_Kn(1, x); };
@@ -173,7 +173,7 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const vecvec &positions,
 
     Eigen::GMRES<Eigen::MatrixXd> solver(sys);
     solver.setTolerance(soltol);
-    return solver.solve(RHS);
+    return solver.solve(RHS).array();
 }
 
 double trapzp(dvec a) {
@@ -181,7 +181,7 @@ double trapzp(dvec a) {
     return area * 2 * M_PI / a.size();
 }
 
-void writeH5(hid_t fid, std::string path, std::vector<vecvec> time_data) {
+void writeH5(hid_t fid, std::string path, std::vector<dvecvec> time_data) {
     hsize_t dims[3] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].rows(),
                        (hsize_t)time_data[0].cols()};
     hid_t dataspace_id = H5Screate_simple(3, dims, NULL);
@@ -621,7 +621,7 @@ int main(int argc, char *argv[]) {
     dvec x_i = a_i.cos() + eps * (mp * a_i).sin() * a_i.cos();
     dvec y_i = a_i.sin() + eps * (mp * a_i).sin() * a_i.sin();
 
-    vecvec positions_n(params.N, 2);
+    dvecvec positions_n(params.N, 2);
     positions_n.col(0) = x_i;
     positions_n.col(1) = y_i;
 
@@ -631,11 +631,11 @@ int main(int argc, char *argv[]) {
     dvec y_ip = D(y_i, alpha);
     dvec y_ipp = D2(y_i, alpha);
 
-    vecvec tangents_n(params.N, 2);
+    dvecvec tangents_n(params.N, 2);
     tangents_n.col(0) = x_ip;
     tangents_n.col(1) = y_ip;
 
-    vecvec normals_n(params.N, 2);
+    dvecvec normals_n(params.N, 2);
     normals_n.col(0) = -2 * M_PI / L_n * y_ip;
     normals_n.col(1) = 2 * M_PI / L_n * x_ip;
 
@@ -667,11 +667,11 @@ int main(int argc, char *argv[]) {
     dvec theta_np1 = theta_n + params.dt * (2 * M_PI / L_n) *
                                    (D(U_n, alpha) + dthda_n * T_n);
 
-    vecvec tangents_np1(params.N, 2);
+    dvecvec tangents_np1(params.N, 2);
     tangents_np1.col(0) = theta_np1.cos();
     tangents_np1.col(1) = theta_np1.sin();
 
-    vecvec normals_np1(params.N, 2);
+    dvecvec normals_np1(params.N, 2);
     normals_np1.col(0) = -theta_np1.sin();
     normals_np1.col(1) = theta_np1.cos();
 
@@ -688,7 +688,7 @@ int main(int argc, char *argv[]) {
                  L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.sin()) -
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.sin());
 
-    vecvec positions_np1(params.N, 2);
+    dvecvec positions_np1(params.N, 2);
     positions_np1.col(0) = x_np1;
     positions_np1.col(1) = y_np1;
 
@@ -707,7 +707,7 @@ int main(int argc, char *argv[]) {
     dvec D_U_last = D(U_n, alpha);
     std::vector<dvec> theta_t;
     std::vector<dvec> U_t;
-    std::vector<vecvec> positions_t;
+    std::vector<dvecvec> positions_t;
     while (t < params.t_max) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
@@ -733,11 +733,11 @@ int main(int argc, char *argv[]) {
                 (3 * (2 * M_PI / L_np2) * (D_U_np1 + dthda_np1 * T_np1) -
                  (2 * M_PI / L_np1) * (D_U_last + dthda_n * T_n));
 
-        vecvec tangents_np2(params.N, 2);
+        dvecvec tangents_np2(params.N, 2);
         tangents_np2.col(0) = theta_np2.cos();
         tangents_np2.col(1) = theta_np2.sin();
 
-        vecvec normals_np2(params.N, 2);
+        dvecvec normals_np2(params.N, 2);
         normals_np2.col(0) = -theta_np2.sin();
         normals_np2.col(1) = theta_np2.cos();
 
@@ -756,7 +756,7 @@ int main(int argc, char *argv[]) {
                      L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.sin()) -
                      L_np2 / (2 * M_PI) * trapzp(theta_np2.sin());
 
-        vecvec positions_np2(params.N, 2);
+        dvecvec positions_np2(params.N, 2);
         positions_np2.col(0) = x_np2;
         positions_np2.col(1) = y_np2;
 
