@@ -11,6 +11,8 @@
 #include <unsupported/Eigen/IterativeSolvers>
 //#include <Eigen/IterativeLinearSolvers>
 
+#include <getopt.h>
+
 #include "function_generator.hpp"
 
 #include <hdf5.h>
@@ -25,6 +27,7 @@ typedef struct {
     double gam;
     double dt;
     double soltol;
+    double t_max;
     int N;
     int n_record;
 } param_t;
@@ -458,26 +461,143 @@ dvec find_zeros(double mp, double eps, dvec &s_i) {
     return a_i;
 }
 
-int main(int argc, char *argv[]) {
+void print_params(param_t &params) {
+    cout << "etaR: " << params.etaR << endl;
+    cout << "eta: " << params.eta << endl;
+    cout << "eta0: " << params.eta0 << endl;
+    cout << "G: " << params.G << endl;
+    cout << "delta: " << params.delta << endl;
+    cout << "lam: " << params.lam << endl;
+    ;
+    cout << "gam: " << params.gam << endl;
+    cout << "dt: " << params.dt << endl;
+    cout << "soltol: " << params.soltol << endl;
+    cout << "t_max: " << params.t_max << endl;
+    cout << "N: " << params.N << endl;
+    cout << "n_record: " << params.n_record << endl;
+}
+
+param_t parse_args(int argc, char *argv[]) {
     param_t params;
 
+    //// Set default parameters.
+
     //// --------- physical parameters (let Omega = 1) --------
-    params.etaR = 1; // rotational viscosity
-    params.eta = 1;  // shear viscosity
-    params.eta0 = 1; // odd viscosity
-    params.G = 10;   // substrate drag (big Gamma)
-    params.delta =
-        sqrt((params.eta + params.etaR) / params.G); // BL length scale
-    params.lam = 1.0 / params.delta;
+    params.etaR = 1;       // rotational viscosity
+    params.eta = 1;        // shear viscosity
+    params.eta0 = 1;       // odd viscosity
+    params.G = 10;         // substrate drag (big Gamma)
     params.gam = 0.01;     // line tension (little gamma)
     params.n_record = 100; // Number of timesteps between output
 
     //// -------- numerical parameters --------
     params.N = pow(2, 7) - 1; // number of points on curve
     params.dt = 0.001;
-    double t = 0; // time
-    double t_max = 10.0;
+    params.t_max = 10.0;
     params.soltol = 1e-12;
+
+    while (true) {
+        static struct option long_options[] = {
+            {"etaR", required_argument, 0, 'r'},
+            {"eta", required_argument, 0, 'e'},
+            {"eta0", required_argument, 0, 'n'},
+            {"G", required_argument, 0, 'G'},
+            {"gam", required_argument, 0, 'g'},
+            {"dt", required_argument, 0, 'd'},
+            {"t_max", required_argument, 0, 't'},
+            {"soltol", required_argument, 0, 's'},
+            {"n_record", required_argument, 0, 'f'},
+            {"N", required_argument, 0, 'N'},
+            {0, 0, 0, 0}};
+
+        int option_index = 0;
+        int c = getopt_long(argc, argv, "r:e:n:G:g:d:t:s:f:", long_options,
+                            &option_index);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 0:
+            /* If this option set a flag, do nothing else now. */
+            if (long_options[option_index].flag != 0)
+                break;
+            printf("option %s", long_options[option_index].name);
+            if (optarg)
+                printf(" with arg %s", optarg);
+            printf("\n");
+            break;
+
+        case 'r':
+            printf("option -r (etaR) with value `%s'\n", optarg);
+            params.etaR = atof(optarg);
+            break;
+
+        case 'e':
+            printf("option -e (eta) with value `%s'\n", optarg);
+            params.eta = atof(optarg);
+            break;
+
+        case 'n':
+            printf("option -n (eta0) with value `%s'\n", optarg);
+            params.eta0 = atof(optarg);
+            break;
+
+        case 'G':
+            printf("option -G (G) with value `%s'\n", optarg);
+            params.G = atof(optarg);
+            break;
+
+        case 'g':
+            printf("option -g (gam) with value `%s'\n", optarg);
+            params.gam = atof(optarg);
+            break;
+
+        case 'd':
+            printf("option -d (dt) with value `%s'\n", optarg);
+            params.dt = atof(optarg);
+            break;
+
+        case 't':
+            printf("option -t (t_max) with value `%s'\n", optarg);
+            params.t_max = atof(optarg);
+            break;
+
+        case 's':
+            printf("option -s (soltol) with value `%s'\n", optarg);
+            params.soltol = atof(optarg);
+            break;
+
+        case 'f':
+            printf("option -f (n_record) with value `%s'\n", optarg);
+            params.n_record = atoi(optarg);
+            break;
+
+        case 'N':
+            printf("option -N (N) with value `%s'\n", optarg);
+            params.N = atoi(optarg);
+            break;
+
+        case '?':
+            /* getopt_long already printed an error message. */
+            break;
+
+        default:
+            abort();
+        }
+    }
+
+    // Derived parameters
+    params.delta =
+        sqrt((params.eta + params.etaR) / params.G); // BL length scale
+    params.lam = 1.0 / params.delta;
+
+    return params;
+}
+
+int main(int argc, char *argv[]) {
+    param_t params = parse_args(argc, argv);
+    print_params(params);
 
     //// -------- initialize boundary (periodic BCs) ---------
     dvec alpha = linspace(0, 2 * M_PI, params.N + 1);
@@ -579,17 +699,16 @@ int main(int argc, char *argv[]) {
     y_ipp = D2(y_i, alpha);
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
+
+    double t = 0; // time
     t += params.dt;
-
     dvec uv_n = uv_np1;
-
     int i_step = 0;
-
+    dvec D_U_last = D(U_n, alpha);
     std::vector<dvec> theta_t;
     std::vector<dvec> U_t;
     std::vector<vecvec> positions_t;
-    dvec D_U_last = D(U_n, alpha);
-    while (t < t_max) {
+    while (t < params.t_max) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
                                   normals_np1, L_np1, params.soltol);
