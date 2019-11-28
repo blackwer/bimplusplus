@@ -663,33 +663,36 @@ int main(int argc, char *argv[]) {
     dvec theta_np1 = theta_n + params.dt * (2 * M_PI / L_n) *
                                    (D(U_np1, alpha) + dthda_n * T_np1);
 
+    dvec costheta = theta_np1.cos();
+    dvec sintheta = theta_np1.sin();
     dvecvec tangents_np1(params.N, 2);
-    tangents_np1.col(0) = theta_np1.cos();
-    tangents_np1.col(1) = theta_np1.sin();
+    tangents_np1.col(0) = costheta;
+    tangents_np1.col(1) = sintheta;
 
     dvecvec normals_np1(params.N, 2);
-    normals_np1.col(0) = -theta_np1.sin();
-    normals_np1.col(1) = theta_np1.cos();
+    normals_np1.col(0) = -sintheta;
+    normals_np1.col(1) = costheta;
 
     // update 1 point, then use (x,y) = integral of tangent
     double X_np1 = positions_n(0, 0) + params.dt * U_np1[0] * normals_n(0, 0) +
                    T_np1[0] * tangents_n(0, 0);
     double Y_np1 = positions_n(0, 1) + params.dt * U_np1[0] * normals_n(0, 1) +
                    T_np1[0] * tangents_n(0, 1);
-    dvec x_np1 = X_np1 + L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.cos()) -
-                 L_np1 / (2 * M_PI) * trapzp(theta_np1.cos());
-    dvec y_np1 = Y_np1 + L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.sin()) -
-                 L_np1 / (2 * M_PI) * trapzp(theta_np1.sin());
 
     dvecvec positions_np1(params.N, 2);
-    positions_np1.col(0) = x_np1;
-    positions_np1.col(1) = y_np1;
+    positions_np1.col(0) =
+        X_np1 +
+        L_np1 / (2 * M_PI) * (cumtrapz(alpha, costheta) - trapzp(costheta));
+
+    positions_np1.col(1) =
+        Y_np1 +
+        L_np1 / (2 * M_PI) * (cumtrapz(alpha, sintheta) - trapzp(sintheta));
 
     // using new positions, compute new curvature and therefore
-    x_ip = D(x_np1, alpha);
-    x_ipp = D2(x_np1, alpha);
-    y_ip = D(y_np1, alpha);
-    y_ipp = D2(y_np1, alpha);
+    x_ip = D(positions_np1.col(0), alpha);
+    x_ipp = D2(positions_np1.col(0), alpha);
+    y_ip = D(positions_np1.col(1), alpha);
+    y_ipp = D2(positions_np1.col(1), alpha);
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
     dvec D_U_np1 = D(U_np1, alpha);
