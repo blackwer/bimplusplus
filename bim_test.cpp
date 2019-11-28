@@ -295,7 +295,7 @@ void writeH5(hid_t fid, std::string path, int val) {
     H5Sclose(dataspace_id);
 }
 
-dvec D(dvec &numer, dvec &denom) {
+dvec D(dvec numer, dvec denom) {
     const int N = numer.size();
     dvec res(N);
 
@@ -346,7 +346,7 @@ dvec D(dvec &numer, dvec &denom) {
     return res;
 }
 
-dvec D2(dvec &numer, dvec &denom) {
+dvec D2(dvec numer, dvec denom) {
     const int N = numer.size();
     dvec res(N);
 
@@ -387,9 +387,9 @@ dvec D2(dvec &numer, dvec &denom) {
     return res;
 }
 
-dvec linspace(double a, double b, int N) {
-    dvec res(N);
-    for (int i = 0; i < N; ++i)
+dvec linspace_trunced(double a, double b, int N) {
+    dvec res(N - 1);
+    for (int i = 0; i < N - 1; ++i)
         res[i] = a + i * b / (N - 1);
 
     return res;
@@ -602,8 +602,7 @@ int main(int argc, char *argv[]) {
     print_params(params);
 
     //// -------- initialize boundary (periodic BCs) ---------
-    dvec alpha = linspace(0, 2 * M_PI, params.N + 1);
-    alpha.resize(params.N);
+    dvec alpha = linspace_trunced(0, 2 * M_PI, params.N + 1);
 
     double eps = 0.1; // perturbation amplitude
     int mp = 4;       // perturbation mode
@@ -615,23 +614,22 @@ int main(int argc, char *argv[]) {
     dvec dyda = D(y, alpha); // dy/d(alpha)
 
     double L_n = trapzp((dxda * dxda + dyda * dyda).sqrt());
-    dvec s_i = linspace(0, L_n, params.N + 1);
-    s_i.resize(params.N);
+    dvec s_i = linspace_trunced(0, L_n, params.N + 1);
 
     dvec a_i = find_zeros(mp, eps, s_i);
 
     dvec x_i = a_i.cos() + eps * (mp * a_i).sin() * a_i.cos();
     dvec y_i = a_i.sin() + eps * (mp * a_i).sin() * a_i.sin();
 
-    dvecvec positions_n(params.N, 2);
-    positions_n.col(0) = x_i;
-    positions_n.col(1) = y_i;
-
     // -------- (x,y) -> (theta,L) --------
     dvec x_ip = D(x_i, alpha);
     dvec x_ipp = D2(x_i, alpha);
     dvec y_ip = D(y_i, alpha);
     dvec y_ipp = D2(y_i, alpha);
+
+    dvecvec positions_n(params.N, 2);
+    positions_n.col(0) = x_i;
+    positions_n.col(1) = y_i;
 
     dvecvec tangents_n(params.N, 2);
     tangents_n.col(0) = x_ip;
@@ -641,33 +639,29 @@ int main(int argc, char *argv[]) {
     normals_n.col(0) = -2 * M_PI / L_n * y_ip;
     normals_n.col(1) = 2 * M_PI / L_n * x_ip;
 
-    dvec kappa_n =
-        (x_ip * y_ipp - y_ip * x_ipp) / (x_ip * x_ip + y_ip * y_ip).pow(1.5);
-
-    dvec theta_n = (L_n / (2 * M_PI)) * cumtrapz(alpha, kappa_n) +
-                   atan2(y_ip[0], x_ip[0]) + 2 * M_PI -
-                   L_n / (2 * M_PI) * trapzp(kappa_n);
-
-    dvec dthda_n = L_n / (2 * M_PI) * kappa_n;
-
-    double area_n = 0.5 * trapzp(x_i * x_i + y_i * y_i);
-
     // -------- given curve, solve linear system for flow --------
     dvec uv_np1 = inteqnsolve(params, positions_n, tangents_n, normals_n, L_n,
                               params.soltol);
 
-    dvec U_n = dvec(params.N).setZero();
+    dvec U_np1 = dvec(params.N).setZero();
     for (int i = 0; i < params.N; ++i)
         for (int j = 0; j < 2; ++j)
-            U_n[i] += normals_n(i, j) * uv_np1[2 * i + j];
+            U_np1[i] += normals_n(i, j) * uv_np1[2 * i + j];
 
-    dvec T_n = cumtrapz(alpha, dthda_n * U_n) -
-               trapzp(dthda_n * U_n) * alpha / (2 * M_PI);
+    dvec kappa_n =
+        (x_ip * y_ipp - y_ip * x_ipp) / (x_ip * x_ip + y_ip * y_ip).pow(1.5);
+    dvec theta_n = (L_n / (2 * M_PI)) * cumtrapz(alpha, kappa_n) +
+                   atan2(y_ip[0], x_ip[0]) + 2 * M_PI -
+                   L_n / (2 * M_PI) * trapzp(kappa_n);
+    dvec dthda_n = L_n / (2 * M_PI) * kappa_n;
+    double area_n = 0.5 * trapzp(x_i * x_i + y_i * y_i);
+    dvec T_np1 = cumtrapz(alpha, dthda_n * U_np1) -
+                 trapzp(dthda_n * U_np1) * alpha / (2 * M_PI);
 
     // update theta and L (Euler forward for 1 step)
-    double L_np1 = L_n - params.dt * trapzp(dthda_n * U_n);
+    double L_np1 = L_n - params.dt * trapzp(dthda_n * U_np1);
     dvec theta_np1 = theta_n + params.dt * (2 * M_PI / L_n) *
-                                   (D(U_n, alpha) + dthda_n * T_n);
+                                   (D(U_np1, alpha) + dthda_n * T_np1);
 
     dvecvec tangents_np1(params.N, 2);
     tangents_np1.col(0) = theta_np1.cos();
@@ -677,17 +671,14 @@ int main(int argc, char *argv[]) {
     normals_np1.col(0) = -theta_np1.sin();
     normals_np1.col(1) = theta_np1.cos();
 
-    // // update 1 point, then use (x,y) = integral of tangent
-    double X_np1[2] = {
-        positions_n(0, 0) + params.dt * U_n[0] * normals_n(0, 0) +
-            T_n[0] * tangents_n(0, 0),
-        positions_n(0, 1) + params.dt * U_n[0] * normals_n(0, 1) +
-            T_n[0] * tangents_n(0, 1)};
-    dvec x_np1 = X_np1[0] +
-                 L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.cos()) -
+    // update 1 point, then use (x,y) = integral of tangent
+    double X_np1 = positions_n(0, 0) + params.dt * U_np1[0] * normals_n(0, 0) +
+                   T_np1[0] * tangents_n(0, 0);
+    double Y_np1 = positions_n(0, 1) + params.dt * U_np1[0] * normals_n(0, 1) +
+                   T_np1[0] * tangents_n(0, 1);
+    dvec x_np1 = X_np1 + L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.cos()) -
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.cos());
-    dvec y_np1 = X_np1[1] +
-                 L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.sin()) -
+    dvec y_np1 = Y_np1 + L_np1 / (2 * M_PI) * cumtrapz(alpha, theta_np1.sin()) -
                  L_np1 / (2 * M_PI) * trapzp(theta_np1.sin());
 
     dvecvec positions_np1(params.N, 2);
@@ -695,18 +686,17 @@ int main(int argc, char *argv[]) {
     positions_np1.col(1) = y_np1;
 
     // using new positions, compute new curvature and therefore
-    x_ip = D(x_i, alpha);
-    x_ipp = D2(x_i, alpha);
-    y_ip = D(y_i, alpha);
-    y_ipp = D2(y_i, alpha);
+    x_ip = D(x_np1, alpha);
+    x_ipp = D2(x_np1, alpha);
+    y_ip = D(y_np1, alpha);
+    y_ipp = D2(y_np1, alpha);
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
+    dvec D_U_np1 = D(U_np1, alpha);
 
     double t = 0; // time
     t += params.dt;
-    dvec uv_n = uv_np1;
     int i_step = 0;
-    dvec D_U_last = D(U_n, alpha);
     std::vector<dvec> theta_t;
     std::vector<dvec> U_t;
     std::vector<dvecvec> positions_t;
@@ -714,75 +704,75 @@ int main(int argc, char *argv[]) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
                                   normals_np1, L_np1, params.soltol);
-        dvec U_np1 = dvec(params.N).setZero();
-        for (int i = 0; i < params.N; ++i)
-            for (int j = 0; j < 2; ++j)
-                U_np1[i] += normals_np1(i, j) * uv_np2[2 * i + j];
+        dvec U_np2 = dvec(params.N);
+        for (int i = 0; i < params.N; ++i) {
+            U_np2[i] = normals_np1(i, 0) * uv_np2[2 * i] +
+                       normals_np1(i, 1) * uv_np2[2 * i + 1];
+        }
 
-        dvec T_np1 = cumtrapz(alpha, dthda_np1 * U_np1) -
-                     alpha / (2 * M_PI) * trapzp(dthda_np1 * U_np1);
+        dvec T_np2 = cumtrapz(alpha, dthda_np1 * U_np2) -
+                     alpha / (2 * M_PI) * trapzp(dthda_np1 * U_np2);
 
         // update theta and L
         double L_np2 = L_np1 - 0.5 * params.dt *
-                                   (3 * trapzp(dthda_np1 * U_np1) -
-                                    trapzp(dthda_n * U_n)); // AB2
+                                   (3 * trapzp(dthda_np1 * U_np2) -
+                                    trapzp(dthda_n * U_np1)); // AB2
 
-        // FIXME: Can cache the call to D(U_n, alpha)
-        dvec D_U_np1 = D(U_np1, alpha);
+        dvec D_U_np2 = D(U_np2, alpha);
         dvec theta_np2 =
             theta_np1 +
             0.5 * params.dt *
-                (3 * (2 * M_PI / L_np2) * (D_U_np1 + dthda_np1 * T_np1) -
-                 (2 * M_PI / L_np1) * (D_U_last + dthda_n * T_n));
+                (3 * (2 * M_PI / L_np2) * (D_U_np2 + dthda_np1 * T_np2) -
+                 (2 * M_PI / L_np1) * (D_U_np1 + dthda_n * T_np1));
+
+        dvec costheta = theta_np2.cos();
+        dvec sintheta = theta_np2.sin();
 
         dvecvec tangents_np2(params.N, 2);
-        tangents_np2.col(0) = theta_np2.cos();
-        tangents_np2.col(1) = theta_np2.sin();
+        tangents_np2.col(0) = costheta;
+        tangents_np2.col(1) = sintheta;
 
         dvecvec normals_np2(params.N, 2);
-        normals_np2.col(0) = -theta_np2.sin();
-        normals_np2.col(1) = theta_np2.cos();
+        normals_np2.col(0) = -sintheta;
+        normals_np2.col(1) = costheta;
 
         // integrate tangent to get X(alpha)
-        double X_np2[2] = {
+        double X_np2 =
             positions_np1(0, 0) + 0.5 * params.dt *
-                                      (3 * U_np1[0] * normals_np2(0, 0) -
-                                       U_n[0] * normals_np1(0, 0)),
+                                      (3 * U_np2[0] * normals_np2(0, 0) -
+                                       U_np1[0] * normals_np1(0, 0));
+        double Y_np2 =
             positions_np1(0, 1) + 0.5 * params.dt *
-                                      (3 * U_np1[0] * normals_np2(0, 1) -
-                                       U_n[0] * normals_np1(0, 1))};
-        dvec x_np2 = X_np2[0] +
-                     L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.cos()) -
-                     L_np2 / (2 * M_PI) * trapzp(theta_np2.cos());
-        dvec y_np2 = X_np2[1] +
-                     L_np2 / (2 * M_PI) * cumtrapz(alpha, theta_np2.sin()) -
-                     L_np2 / (2 * M_PI) * trapzp(theta_np2.sin());
+                                      (3 * U_np2[0] * normals_np2(0, 1) -
+                                       U_np1[0] * normals_np1(0, 1));
 
         dvecvec positions_np2(params.N, 2);
-        positions_np2.col(0) = x_np2;
-        positions_np2.col(1) = y_np2;
+        positions_np2.col(0) =
+            X_np2 +
+            L_np2 / (2 * M_PI) * (cumtrapz(alpha, costheta) - trapzp(costheta));
+        positions_np2.col(1) =
+            Y_np2 +
+            L_np2 / (2 * M_PI) * (cumtrapz(alpha, sintheta) - trapzp(sintheta));
 
         // calculate new curvature
-        x_ip = D(x_np2, alpha);
-        x_ipp = D2(x_np2, alpha);
-        y_ip = D(y_np2, alpha);
-        y_ipp = D2(y_np2, alpha);
+        x_ip = D(positions_np2.col(0), alpha);
+        x_ipp = D2(positions_np2.col(0), alpha);
+        y_ip = D(positions_np2.col(1), alpha);
+        y_ipp = D2(positions_np2.col(1), alpha);
         dvec dthda_np2 = L_np2 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                          (x_ip.square() + y_ip.square()).pow(1.5);
 
         // change n and n-1 timestep info
         dthda_n = dthda_np1;
-        U_n = U_np1;
-        T_n = T_np1;
-        uv_n = uv_np2;
+        dthda_np1 = dthda_np2;
+        U_np1 = U_np2;
+        T_np1 = T_np2;
         positions_np1 = positions_np2;
         normals_np1 = normals_np2;
         tangents_np1 = tangents_np2;
         L_np1 = L_np2;
-        dthda_np1 = dthda_np2;
         theta_np1 = theta_np2;
-        uv_np1 = uv_np2;
-        D_U_last = D_U_np1;
+        D_U_np1 = D_U_np2;
 
         t += params.dt;
 
@@ -790,7 +780,7 @@ int main(int argc, char *argv[]) {
         if (i_step % params.n_record == 0) {
             positions_t.push_back(positions_np1);
             theta_t.push_back(theta_np1);
-            U_t.push_back(U_np1);
+            U_t.push_back(U_np2);
         }
     }
 
