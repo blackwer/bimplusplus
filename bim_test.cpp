@@ -295,7 +295,7 @@ void writeH5(hid_t fid, std::string path, int val) {
     H5Sclose(dataspace_id);
 }
 
-dvec D(dvec numer, dvec denom) {
+dvec D(dvec numer, double delta_a) {
     const int N = numer.size();
     dvec res(N);
 
@@ -313,7 +313,7 @@ dvec D(dvec numer, dvec denom) {
 
     gsl_fft_complex_forward(data, 1, N, wt, work);
 
-    double kdelta = 2 * M_PI / N / (denom[1] - denom[0]);
+    double kdelta = 2 * M_PI / N / delta_a;
     for (int i = 0; i < N / 2 + 1; ++i) {
         double k = kdelta * i;
         if (fabs(data[2 * i]) < 1E-5)
@@ -346,9 +346,10 @@ dvec D(dvec numer, dvec denom) {
     return res;
 }
 
-dvec D2(dvec numer, dvec denom) {
+void D1D2(dvec numer, double delta_a, dvec &dx, dvec &ddx) {
     const int N = numer.size();
-    dvec res(N);
+    dx.resize(N);
+    ddx.resize(N);
 
     gsl_fft_complex_wavetable *wt;
     gsl_fft_complex_workspace *work;
@@ -356,35 +357,55 @@ dvec D2(dvec numer, dvec denom) {
     work = gsl_fft_complex_workspace_alloc(N);
     wt = gsl_fft_complex_wavetable_alloc(N);
 
-    double data[2 * N];
+    double data1[2 * N];
     for (int i = 0; i < N; ++i) {
-        data[i * 2] = numer[i];
-        data[i * 2 + 1] = 0.0;
+        data1[i * 2] = numer[i];
+        data1[i * 2 + 1] = 0.0;
     }
 
-    gsl_fft_complex_forward(data, 1, N, wt, work);
+    gsl_fft_complex_forward(data1, 1, N, wt, work);
 
-    double kdelta = 2 * M_PI / N / (denom[1] - denom[0]);
+    double data2[2 * N];
+    for (int i = 0; i < 2 * N; ++i)
+        data2[i] = data1[i];
+
+    double kdelta = 2 * M_PI / N / delta_a;
     for (int i = 0; i < N / 2 + 1; ++i) {
         double k = kdelta * i;
-        data[2 * i] *= -k * k;
-        data[2 * i + 1] *= -k * k;
+        // For first derivative (i*k)
+        std::swap(data1[2 * i], data1[2 * i + 1]);
+        data1[2 * i] *= -k;
+        data1[2 * i + 1] *= k;
+
+        // For second derivative (-k^2)
+        data2[2 * i] *= -k * k;
+        data2[2 * i + 1] *= -k * k;
     }
     for (int i = N / 2 + 1; i < N; ++i) {
         double k = -0.5 * kdelta * N + kdelta * (i - N / 2 - 0.5);
-        data[2 * i] *= -k * k;
-        data[2 * i + 1] *= -k * k;
+
+        // For first derivative (i*k)
+        std::swap(data1[2 * i], data1[2 * i + 1]);
+        data1[2 * i] *= -k;
+        data1[2 * i + 1] *= k;
+
+        // For second derivative (-k^2)
+        data2[2 * i] *= -k * k;
+        data2[2 * i + 1] *= -k * k;
     }
 
-    gsl_fft_complex_inverse(data, 1, N, wt, work);
-
+    gsl_fft_complex_inverse(data1, 1, N, wt, work);
     for (int i = 0; i < N; ++i)
-        res[i] = data[2 * i];
+        dx[i] = data1[2 * i];
+
+    gsl_fft_complex_inverse(data2, 1, N, wt, work);
+    for (int i = 0; i < N; ++i)
+        ddx[i] = data2[2 * i];
 
     gsl_fft_complex_wavetable_free(wt);
     gsl_fft_complex_workspace_free(work);
 
-    return res;
+    return;
 }
 
 dvec linspace_trunced(double a, double b, int N) {
@@ -603,6 +624,7 @@ int main(int argc, char *argv[]) {
 
     //// -------- initialize boundary (periodic BCs) ---------
     dvec alpha = linspace_trunced(0, 2 * M_PI, params.N + 1);
+    double delta_alpha = alpha(1) - alpha(0);
 
     double eps = 0.1; // perturbation amplitude
     int mp = 4;       // perturbation mode
@@ -610,8 +632,8 @@ int main(int argc, char *argv[]) {
     dvec y = alpha.sin() + eps * (mp * alpha).sin() * alpha.sin();
 
     //// -------- geometric quantities --------
-    dvec dxda = D(x, alpha); // dx/d(alpha)
-    dvec dyda = D(y, alpha); // dy/d(alpha)
+    dvec dxda = D(x, delta_alpha); // dx/d(alpha)
+    dvec dyda = D(y, delta_alpha); // dy/d(alpha)
 
     double L_n = trapzp((dxda * dxda + dyda * dyda).sqrt());
     dvec s_i = linspace_trunced(0, L_n, params.N + 1);
@@ -622,14 +644,13 @@ int main(int argc, char *argv[]) {
     dvec y_i = a_i.sin() + eps * (mp * a_i).sin() * a_i.sin();
 
     // -------- (x,y) -> (theta,L) --------
-    dvec x_ip = D(x_i, alpha);
-    dvec x_ipp = D2(x_i, alpha);
-    dvec y_ip = D(y_i, alpha);
-    dvec y_ipp = D2(y_i, alpha);
-
     dvecvec positions_n(params.N, 2);
     positions_n.col(0) = x_i;
     positions_n.col(1) = y_i;
+
+    dvec x_ip, x_ipp, y_ip, y_ipp;
+    D1D2(x_i, delta_alpha, x_ip, x_ipp);
+    D1D2(y_i, delta_alpha, y_ip, y_ipp);
 
     dvecvec tangents_n(params.N, 2);
     tangents_n.col(0) = x_ip;
@@ -661,7 +682,7 @@ int main(int argc, char *argv[]) {
     // update theta and L (Euler forward for 1 step)
     double L_np1 = L_n - params.dt * trapzp(dthda_n * U_np1);
     dvec theta_np1 = theta_n + params.dt * (2 * M_PI / L_n) *
-                                   (D(U_np1, alpha) + dthda_n * T_np1);
+                                   (D(U_np1, delta_alpha) + dthda_n * T_np1);
 
     dvec costheta = theta_np1.cos();
     dvec sintheta = theta_np1.sin();
@@ -689,13 +710,12 @@ int main(int argc, char *argv[]) {
         L_np1 / (2 * M_PI) * (cumtrapz(alpha, sintheta) - trapzp(sintheta));
 
     // using new positions, compute new curvature and therefore
-    x_ip = D(positions_np1.col(0), alpha);
-    x_ipp = D2(positions_np1.col(0), alpha);
-    y_ip = D(positions_np1.col(1), alpha);
-    y_ipp = D2(positions_np1.col(1), alpha);
+    D1D2(positions_np1.col(0), delta_alpha, x_ip, x_ipp);
+    D1D2(positions_np1.col(1), delta_alpha, y_ip, y_ipp);
+
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
-    dvec D_U_np1 = D(U_np1, alpha);
+    dvec D_U_np1 = D(U_np1, delta_alpha);
 
     double t = 0; // time
     t += params.dt;
@@ -721,7 +741,7 @@ int main(int argc, char *argv[]) {
                                    (3 * trapzp(dthda_np1 * U_np2) -
                                     trapzp(dthda_n * U_np1)); // AB2
 
-        dvec D_U_np2 = D(U_np2, alpha);
+        dvec D_U_np2 = D(U_np2, delta_alpha);
         dvec theta_np2 =
             theta_np1 +
             0.5 * params.dt *
@@ -758,10 +778,8 @@ int main(int argc, char *argv[]) {
             L_np2 / (2 * M_PI) * (cumtrapz(alpha, sintheta) - trapzp(sintheta));
 
         // calculate new curvature
-        x_ip = D(positions_np2.col(0), alpha);
-        x_ipp = D2(positions_np2.col(0), alpha);
-        y_ip = D(positions_np2.col(1), alpha);
-        y_ipp = D2(positions_np2.col(1), alpha);
+        D1D2(positions_np2.col(0), delta_alpha, x_ip, x_ipp);
+        D1D2(positions_np2.col(1), delta_alpha, y_ip, y_ipp);
         dvec dthda_np2 = L_np2 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                          (x_ip.square() + y_ip.square()).pow(1.5);
 
