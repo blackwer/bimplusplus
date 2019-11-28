@@ -1,47 +1,56 @@
 #include <cmath>
 #include <iostream>
 
+// FFT routines for solving derivatives
+// TODO?: could replace this with FFTW. Might be faster. Just one more
+// dependency...
 #include <gsl/gsl_fft_complex.h>
+
+// Includes for root finding in initialization
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_roots.h>
+
+// For Bessel K functions
 #include <gsl/gsl_sf.h>
 
+// For arrays, matrices, and GMRES
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <unsupported/Eigen/IterativeSolvers>
-//#include <Eigen/IterativeLinearSolvers>
 
+// option parser
 #include <getopt.h>
 
-#include "function_generator.hpp"
-
+// Output container for later processing
 #include <hdf5.h>
 
+// Accelerates bessel function calls
+#include "function_generator.hpp"
+
+// Runtime simulation parameters
 typedef struct {
-    double etaR;
-    double eta;
-    double eta0;
-    double G;
-    double delta;
-    double lam;
-    double gam;
-    double dt;
-    double soltol;
-    double t_max;
-    int N;
-    int n_record;
+    double etaR;   // rotational viscosity
+    double eta;    // shear viscosity
+    double eta0;   // odd viscosity
+    double G;      // substrate drag (big Gamma)
+    double delta;  // BL length scale
+    double lam;    // delta^-1
+    double gam;    // line tension (little gamma)
+    double dt;     // timestep
+    double soltol; // desired GMRes accuracy
+    double t_max;  // Time to simulate to
+    int N;         // Number of points on RING
+    int n_record;  // number of timesteps between output
 } param_t;
 
-// typedef std::vector<double> dvec;
+// Some convenience types
 typedef Eigen::ArrayXd dvec;
 typedef Eigen::ArrayXXd dvecvec;
 
-using std::cout;
-using std::endl;
-
+// Creates and solves BIM matrix
 dvec inteqnsolve(const param_t &params, const dvecvec &positions,
-                            const dvecvec &tangents, const dvecvec &normals,
-                            const double L, const double soltol) {
+                 const dvecvec &tangents, const dvecvec &normals,
+                 const double L, const double soltol) {
     auto f_bk0 = [](double x) { return gsl_sf_bessel_Kn(0, x); };
     auto f_bk1 = [](double x) { return gsl_sf_bessel_Kn(1, x); };
     auto f_bk2 = [](double x) { return gsl_sf_bessel_Kn(2, x); };
@@ -51,8 +60,6 @@ dvec inteqnsolve(const param_t &params, const dvecvec &positions,
     static FunctionGenerator<8, 4096, double> bessel_2(f_bk2, 1e-10, 100);
     static FunctionGenerator<8, 4096, double> bessel_3(f_bk3, 1e-10, 100);
 
-    Eigen::MatrixXd sys(2 * params.N, 2 * params.N);
-
     const double etaR = params.etaR;
     const double eta = params.eta;
     const double eta0 = params.eta0;
@@ -61,17 +68,17 @@ dvec inteqnsolve(const param_t &params, const dvecvec &positions,
     const double gam = params.gam;
     const int N = params.N;
 
-    Eigen::VectorXd RHS(2 * params.N);
+    Eigen::MatrixXd sys(2 * N, 2 * N);
+    Eigen::VectorXd RHS(2 * N);
     const double fs_coeff = 0.5 / (M_PI * lam * lam);
-
-    for (int m = 0; m < params.N; ++m) {
+    for (int m = 0; m < N; ++m) {
         double temp[2] = {0.0, 0.0};
-        for (int n = 0; n < params.N; ++n) {
+        for (int n = 0; n < N; ++n) {
             if (m != n) {
                 const double d[2] = {positions(n, 0) - positions(m, 0),
                                      positions(n, 1) - positions(m, 1)};
                 const double r = sqrt(d[0] * d[0] + d[1] * d[1]);
-                const double rbar = r * params.lam;
+                const double rbar = r * lam;
                 const double rbar2 = rbar * rbar;
                 const double rbar3 = rbar2 * rbar;
                 const double r2 = r * r;
@@ -176,10 +183,8 @@ dvec inteqnsolve(const param_t &params, const dvecvec &positions,
     return solver.solve(RHS).array();
 }
 
-double trapzp(dvec a) {
-    double area = a.sum();
-    return area * 2 * M_PI / a.size();
-}
+// Trapezoidal integration with periodic boundary
+double trapzp(dvec a) { return a.sum() * 2 * M_PI / a.size(); }
 
 void writeH5(hid_t fid, std::string path, std::vector<dvecvec> time_data) {
     hsize_t dims[3] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].rows(),
@@ -189,10 +194,10 @@ void writeH5(hid_t fid, std::string path, std::vector<dvecvec> time_data) {
         H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
                    H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
+    // Flatten array into one dimension
     std::vector<double> flattened(time_data.size() * time_data[0].rows() *
                                   time_data[0].cols());
-
-    long int offset = 0;
+    size_t offset = 0;
     for (auto &arr : time_data) {
         for (int i = 0; i < arr.rows(); ++i) {
             for (int j = 0; j < arr.cols(); ++j)
@@ -201,13 +206,14 @@ void writeH5(hid_t fid, std::string path, std::vector<dvecvec> time_data) {
         offset += arr.rows() * arr.cols();
     }
 
+    // Dump output to file
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
              flattened.data());
 
-    /* End access to the dataset and release resources used by it. */
+    // End access to the dataset and release resources used by it.
     H5Dclose(dataset_id);
 
-    /* Terminate access to the data space. */
+    // Terminate access to the data space.
     H5Sclose(dataspace_id);
 }
 
@@ -218,22 +224,23 @@ void writeH5(hid_t fid, std::string path, std::vector<dvec> time_data) {
         H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
                    H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
+    // Flatten array into one dimension
     std::vector<double> flattened(time_data.size() * time_data[0].size());
-
-    long int offset = 0;
+    size_t offset = 0;
     for (auto &arr : time_data) {
         for (int i = 0; i < arr.size(); ++i)
             flattened[i + offset] = arr[i];
         offset += arr.size();
     }
 
+    // Dump output to file
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
              flattened.data());
 
-    /* End access to the dataset and release resources used by it. */
+    // End access to the dataset and release resources used by it.
     H5Dclose(dataset_id);
 
-    /* Terminate access to the data space. */
+    // Terminate access to the data space.
     H5Sclose(dataspace_id);
 }
 
@@ -244,13 +251,14 @@ void writeH5(hid_t fid, std::string path, dvec arr) {
         H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
                    H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
+    // Dump output to file
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
              arr.data());
 
-    /* End access to the dataset and release resources used by it. */
+    // End access to the dataset and release resources used by it.
     H5Dclose(dataset_id);
 
-    /* Terminate access to the data space. */
+    // Terminate access to the data space.
     H5Sclose(dataspace_id);
 }
 
@@ -264,10 +272,10 @@ void writeH5(hid_t fid, std::string path, double val) {
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
              &val);
 
-    /* End access to the dataset and release resources used by it. */
+    // End access to the dataset and release resources used by it.
     H5Dclose(dataset_id);
 
-    /* Terminate access to the data space. */
+    // Terminate access to the data space.
     H5Sclose(dataspace_id);
 }
 
@@ -280,10 +288,10 @@ void writeH5(hid_t fid, std::string path, int val) {
 
     H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &val);
 
-    /* End access to the dataset and release resources used by it. */
+    // End access to the dataset and release resources used by it.
     H5Dclose(dataset_id);
 
-    /* Terminate access to the data space. */
+    // Terminate access to the data space.
     H5Sclose(dataspace_id);
 }
 
@@ -425,7 +433,7 @@ dvec cumtrapz(dvec X, dvec Y) {
 
 void printVec(dvec &x) {
     for (int i = 0; i < x.size(); ++i)
-        cout << x[i] << endl;
+        std::cout << x[i] << std::endl;
 }
 
 dvec find_zeros(double mp, double eps, dvec &s_i) {
@@ -462,36 +470,31 @@ dvec find_zeros(double mp, double eps, dvec &s_i) {
 }
 
 void print_params(param_t &params) {
-    cout << "etaR: " << params.etaR << endl;
-    cout << "eta: " << params.eta << endl;
-    cout << "eta0: " << params.eta0 << endl;
-    cout << "G: " << params.G << endl;
-    cout << "delta: " << params.delta << endl;
-    cout << "lam: " << params.lam << endl;
-    ;
-    cout << "gam: " << params.gam << endl;
-    cout << "dt: " << params.dt << endl;
-    cout << "soltol: " << params.soltol << endl;
-    cout << "t_max: " << params.t_max << endl;
-    cout << "N: " << params.N << endl;
-    cout << "n_record: " << params.n_record << endl;
+    std::cout << "etaR: " << params.etaR << std::endl;
+    std::cout << "eta: " << params.eta << std::endl;
+    std::cout << "eta0: " << params.eta0 << std::endl;
+    std::cout << "G: " << params.G << std::endl;
+    std::cout << "delta: " << params.delta << std::endl;
+    std::cout << "lam: " << params.lam << std::endl;
+    std::cout << "gam: " << params.gam << std::endl;
+    std::cout << "dt: " << params.dt << std::endl;
+    std::cout << "soltol: " << params.soltol << std::endl;
+    std::cout << "t_max: " << params.t_max << std::endl;
+    std::cout << "N: " << params.N << std::endl;
+    std::cout << "n_record: " << params.n_record << std::endl;
 }
 
 param_t parse_args(int argc, char *argv[]) {
     param_t params;
 
-    //// Set default parameters.
-
-    //// --------- physical parameters (let Omega = 1) --------
-    params.etaR = 1;       // rotational viscosity
-    params.eta = 1;        // shear viscosity
-    params.eta0 = 1;       // odd viscosity
-    params.G = 10;         // substrate drag (big Gamma)
-    params.gam = 0.01;     // line tension (little gamma)
-    params.n_record = 100; // Number of timesteps between output
-
-    //// -------- numerical parameters --------
-    params.N = pow(2, 7) - 1; // number of points on curve
+    // Set default parameters.
+    params.etaR = 1;
+    params.eta = 1;
+    params.eta0 = 1;
+    params.G = 10;
+    params.gam = 0.01;
+    params.n_record = 100;
+    params.N = pow(2, 7) - 1;
     params.dt = 0.001;
     params.t_max = 10.0;
     params.soltol = 1e-12;
@@ -519,7 +522,7 @@ param_t parse_args(int argc, char *argv[]) {
 
         switch (c) {
         case 0:
-            /* If this option set a flag, do nothing else now. */
+            // If this option set a flag, do nothing else now.
             if (long_options[option_index].flag != 0)
                 break;
             printf("option %s", long_options[option_index].name);
@@ -579,7 +582,7 @@ param_t parse_args(int argc, char *argv[]) {
             break;
 
         case '?':
-            /* getopt_long already printed an error message. */
+            // getopt_long already printed an error message.
             break;
 
         default:
@@ -588,8 +591,7 @@ param_t parse_args(int argc, char *argv[]) {
     }
 
     // Derived parameters
-    params.delta =
-        sqrt((params.eta + params.etaR) / params.G); // BL length scale
+    params.delta = sqrt((params.eta + params.etaR) / params.G);
     params.lam = 1.0 / params.delta;
 
     return params;
