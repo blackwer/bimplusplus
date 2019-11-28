@@ -1,5 +1,6 @@
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 // FFT routines for solving derivatives
 // TODO?: could replace this with FFTW. Might be faster. Just one more
@@ -48,9 +49,9 @@ typedef Eigen::ArrayXd dvec;
 typedef Eigen::ArrayXXd dvecvec;
 
 // Creates and solves BIM matrix
-dvec inteqnsolve(const param_t &params, const dvecvec &positions,
-                 const dvecvec &tangents, const dvecvec &normals,
-                 const double L, const double soltol) {
+Eigen::VectorXd inteqnsolve(const param_t &params, const dvecvec &positions,
+                            const dvecvec &tangents, const dvecvec &normals,
+                            const double L, const double soltol) {
     auto f_bk0 = [](double x) { return gsl_sf_bessel_Kn(0, x); };
     auto f_bk1 = [](double x) { return gsl_sf_bessel_Kn(1, x); };
     auto f_bk2 = [](double x) { return gsl_sf_bessel_Kn(2, x); };
@@ -180,73 +181,16 @@ dvec inteqnsolve(const param_t &params, const dvecvec &positions,
 
     Eigen::GMRES<Eigen::MatrixXd> solver(sys);
     solver.setTolerance(soltol);
-    return solver.solve(RHS).array();
+
+    return solver.solve(RHS);
 }
 
 // Trapezoidal integration with periodic boundary
-double trapzp(dvec a) { return a.sum() * 2 * M_PI / a.size(); }
+double trapzp(const dvec &a) { return a.sum() * 2 * M_PI / a.size(); }
 
-void writeH5(hid_t fid, std::string path, std::vector<dvecvec> time_data) {
-    hsize_t dims[3] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].rows(),
-                       (hsize_t)time_data[0].cols()};
-    hid_t dataspace_id = H5Screate_simple(3, dims, NULL);
-    hid_t dataset_id =
-        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-
-    // Flatten array into one dimension
-    std::vector<double> flattened(time_data.size() * time_data[0].rows() *
-                                  time_data[0].cols());
-    size_t offset = 0;
-    for (auto &arr : time_data) {
-        for (int i = 0; i < arr.rows(); ++i) {
-            for (int j = 0; j < arr.cols(); ++j)
-                flattened[arr.cols() * i + j + offset] = arr(i, j);
-        }
-        offset += arr.rows() * arr.cols();
-    }
-
-    // Dump output to file
-    H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-             flattened.data());
-
-    // End access to the dataset and release resources used by it.
-    H5Dclose(dataset_id);
-
-    // Terminate access to the data space.
-    H5Sclose(dataspace_id);
-}
-
-void writeH5(hid_t fid, std::string path, std::vector<dvec> time_data) {
-    hsize_t dims[2] = {(hsize_t)time_data.size(), (hsize_t)time_data[0].size()};
-    hid_t dataspace_id = H5Screate_simple(2, dims, NULL);
-    hid_t dataset_id =
-        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-
-    // Flatten array into one dimension
-    std::vector<double> flattened(time_data.size() * time_data[0].size());
-    size_t offset = 0;
-    for (auto &arr : time_data) {
-        for (int i = 0; i < arr.size(); ++i)
-            flattened[i + offset] = arr[i];
-        offset += arr.size();
-    }
-
-    // Dump output to file
-    H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-             flattened.data());
-
-    // End access to the dataset and release resources used by it.
-    H5Dclose(dataset_id);
-
-    // Terminate access to the data space.
-    H5Sclose(dataspace_id);
-}
-
-void writeH5(hid_t fid, std::string path, dvec arr) {
-    hsize_t dims[1] = {(hsize_t)arr.size()};
-    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+void writeH5(hid_t fid, std::string path, const std::vector<hsize_t> &dims,
+             const dvec &arr) {
+    hid_t dataspace_id = H5Screate_simple(dims.size(), dims.data(), NULL);
     hid_t dataset_id =
         H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
                    H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -295,7 +239,7 @@ void writeH5(hid_t fid, std::string path, int val) {
     H5Sclose(dataspace_id);
 }
 
-dvec D(dvec numer, double delta_a) {
+dvec D(const dvec &numer, double delta_a) {
     const int N = numer.size();
     dvec res(N);
 
@@ -346,7 +290,7 @@ dvec D(dvec numer, double delta_a) {
     return res;
 }
 
-void D1D2(dvec numer, double delta_a, dvec &dx, dvec &ddx) {
+void D1D2(const dvec &numer, double delta_a, dvec &dx, dvec &ddx) {
     const int N = numer.size();
     dx.resize(N);
     ddx.resize(N);
@@ -443,7 +387,7 @@ double func_to_zero(double x, void *params) {
     return ((double *)params)[2] - integrate(x, params);
 }
 
-dvec cumtrapz(dvec X, dvec Y) {
+dvec cumtrapz(const dvec &X, const dvec &Y) {
     dvec res(X.size());
     for (int i = 1; i < X.size(); ++i) {
         double dx = 0.5 * (X[i] - X[i - 1]);
@@ -457,7 +401,7 @@ void printVec(dvec &x) {
         std::cout << x[i] << std::endl;
 }
 
-dvec find_zeros(double mp, double eps, dvec &s_i) {
+dvec find_zeros(double mp, double eps, const dvec &s_i) {
     dvec a_i(s_i.size());
 
     for (int i = 0; i < s_i.size(); ++i) {
@@ -717,13 +661,12 @@ int main(int argc, char *argv[]) {
                      (x_ip.square() + y_ip.square()).pow(1.5);
     dvec D_U_np1 = D(U_np1, delta_alpha);
 
-    double t = 0; // time
-    t += params.dt;
-    int i_step = 0;
-    std::vector<dvec> theta_t;
-    std::vector<dvec> U_t;
-    std::vector<dvecvec> positions_t;
-    while (t < params.t_max) {
+    size_t n_steps = (int)(params.t_max / params.dt);
+    size_t n_meas = n_steps / params.n_record + 1;
+    dvec theta_t(n_meas * params.N);
+    dvec U_t(n_meas * params.N);
+    dvec positions_t(n_meas * params.N * 2);
+    for (size_t i_step = 0; i_step < n_steps; ++i_step) {
         // compute U and T
         dvec uv_np2 = inteqnsolve(params, positions_np1, tangents_np1,
                                   normals_np1, L_np1, params.soltol);
@@ -795,22 +738,27 @@ int main(int argc, char *argv[]) {
         theta_np1 = theta_np2;
         D_U_np1 = D_U_np2;
 
-        t += params.dt;
-
-        i_step++;
         if (i_step % params.n_record == 0) {
-            positions_t.push_back(positions_np1);
-            theta_t.push_back(theta_np1);
-            U_t.push_back(U_np2);
+            int i_record = i_step / params.n_record;
+
+            for (int i = 0; i < params.N; ++i)
+                for (int j = 0; j < 2; ++j)
+                    positions_t[i_record * 2 * params.N + i * 2 + j] =
+                        positions_np2(i, j);
+            for (int i = 0; i < params.N; ++i)
+                theta_t[i_record * params.N + i] = theta_np2[i];
+            for (int i = 0; i < params.N; ++i)
+                U_t[i_record * params.N + i] = U_np2[i];
         }
     }
 
     hid_t file_id =
         H5Fcreate("test.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    writeH5(file_id, "/alpha", alpha);
-    writeH5(file_id, "/theta_t", theta_t);
-    writeH5(file_id, "/U_t", U_t);
-    writeH5(file_id, "/positions_t", positions_t);
+    writeH5(file_id, "/alpha", {(hsize_t)params.N}, alpha);
+    writeH5(file_id, "/theta_t", {(hsize_t)n_meas, (hsize_t)params.N}, theta_t);
+    writeH5(file_id, "/U_t", {(hsize_t)n_meas, (hsize_t)params.N}, U_t);
+    writeH5(file_id, "/positions_t",
+            {(hsize_t)n_meas, (hsize_t)params.N, (hsize_t)2}, positions_t);
     writeH5(file_id, "/area_n", area_n);
     writeH5(file_id, "/etaR", params.etaR);
     writeH5(file_id, "/eta", params.eta);
