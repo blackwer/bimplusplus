@@ -662,7 +662,8 @@ int main(int argc, char *argv[]) {
     dvec D_U_np1 = D(U_np1, delta_alpha);
 
     size_t n_steps = (int)(params.t_max / params.dt);
-    size_t n_meas = n_steps / params.n_record + 1;
+    size_t n_meas =
+        n_steps / params.n_record + (n_steps % params.n_record != 0);
     dvec theta_t(n_meas * params.N);
     dvec U_t(n_meas * params.N);
     dvec positions_t(n_meas * params.N * 2);
