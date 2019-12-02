@@ -42,6 +42,7 @@ typedef struct {
     double t_max;  // Time to simulate to
     int N;         // Number of points on RING
     int n_record;  // number of timesteps between output
+    std::string output_file;
 } param_t;
 
 // Some convenience types
