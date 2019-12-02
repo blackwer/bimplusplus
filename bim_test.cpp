@@ -376,7 +376,7 @@ double integrate(double a, void *params) {
     F.function = integrand;
     F.params = params;
 
-    gsl_integration_qags(&F, 0, a, 0, 1e-7, 1000, w, &result, &error);
+    gsl_integration_qags(&F, 0, a, 0, 1e-11, 1000, w, &result, &error);
 
     gsl_integration_workspace_free(w);
 
@@ -389,6 +389,7 @@ double func_to_zero(double x, void *params) {
 
 dvec cumtrapz(const dvec &X, const dvec &Y) {
     dvec res(X.size());
+    res[0] = 0.0;
     for (int i = 1; i < X.size(); ++i) {
         double dx = 0.5 * (X[i] - X[i - 1]);
         res[i] = res[i - 1] + dx * (Y[i - 1] + Y[i]);
@@ -396,9 +397,18 @@ dvec cumtrapz(const dvec &X, const dvec &Y) {
     return res;
 }
 
-void printVec(dvec &x) {
+void printVec(const dvec &x) {
+    std::cout << "[";
     for (int i = 0; i < x.size(); ++i)
-        std::cout << x[i] << std::endl;
+        printf("%.10f, ", x[i]);
+    std::cout << "]\n";
+}
+
+void printMat(const dvecvec &x) {
+    std::cout << "[";
+    for (int i = 0; i < x.rows(); ++i)
+        printf("%.10f, %.10f; ", x(i, 0), x(i, 1));
+    std::cout << "]\n";
 }
 
 dvec find_zeros(double mp, double eps, const dvec &s_i) {
@@ -424,7 +434,7 @@ dvec find_zeros(double mp, double eps, const dvec &s_i) {
             status = gsl_root_fsolver_iterate(s);
             x0 = result;
             result = gsl_root_fsolver_root(s);
-            status = gsl_root_test_delta(result, x0, 0, 1e-5);
+            status = gsl_root_test_delta(result, x0, 0, 1e-10);
         } while (status == GSL_CONTINUE);
 
         gsl_root_fsolver_free(s);
@@ -597,8 +607,8 @@ int main(int argc, char *argv[]) {
     D1D2(y_i, delta_alpha, y_ip, y_ipp);
 
     dvecvec tangents_n(params.N, 2);
-    tangents_n.col(0) = x_ip;
-    tangents_n.col(1) = y_ip;
+    tangents_n.col(0) = 2 * M_PI / L_n * x_ip;
+    tangents_n.col(1) = 2 * M_PI / L_n * y_ip;
 
     dvecvec normals_n(params.N, 2);
     normals_n.col(0) = -2 * M_PI / L_n * y_ip;
