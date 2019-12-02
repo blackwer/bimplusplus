@@ -291,10 +291,10 @@ dvec D(const dvec &numer, double delta_a) {
     return res;
 }
 
-void D1D2(const dvec &numer, double delta_a, dvec &dx, dvec &ddx) {
+std::pair<dvec, dvec> D1D2(const dvec &numer, double delta_a) {
     const int N = numer.size();
-    dx.resize(N);
-    ddx.resize(N);
+    dvec dx(N);
+    dvec ddx(N);
 
     gsl_fft_complex_wavetable *wt;
     gsl_fft_complex_workspace *work;
@@ -350,7 +350,7 @@ void D1D2(const dvec &numer, double delta_a, dvec &dx, dvec &ddx) {
     gsl_fft_complex_wavetable_free(wt);
     gsl_fft_complex_workspace_free(work);
 
-    return;
+    return std::make_pair(dx, ddx);
 }
 
 dvec linspace_trunced(double a, double b, int N) {
@@ -603,9 +603,8 @@ int main(int argc, char *argv[]) {
     positions_n.col(0) = x_i;
     positions_n.col(1) = y_i;
 
-    dvec x_ip, x_ipp, y_ip, y_ipp;
-    D1D2(x_i, delta_alpha, x_ip, x_ipp);
-    D1D2(y_i, delta_alpha, y_ip, y_ipp);
+    auto[x_ip, x_ipp] = D1D2(x_i, delta_alpha);
+    auto[y_ip, y_ipp] = D1D2(y_i, delta_alpha);
 
     dvecvec tangents_n(params.N, 2);
     tangents_n.col(0) = 2 * M_PI / L_n * x_ip;
@@ -665,8 +664,8 @@ int main(int argc, char *argv[]) {
         L_np1 / (2 * M_PI) * (cumtrapz(alpha, sintheta) - trapzp(sintheta));
 
     // using new positions, compute new curvature and therefore
-    D1D2(positions_np1.col(0), delta_alpha, x_ip, x_ipp);
-    D1D2(positions_np1.col(1), delta_alpha, y_ip, y_ipp);
+    std::tie(x_ip, x_ipp) = D1D2(positions_np1.col(0), delta_alpha);
+    std::tie(y_ip, y_ipp) = D1D2(positions_np1.col(1), delta_alpha);
 
     dvec dthda_np1 = L_np1 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                      (x_ip.square() + y_ip.square()).pow(1.5);
@@ -733,8 +732,8 @@ int main(int argc, char *argv[]) {
             L_np2 / (2 * M_PI) * (cumtrapz(alpha, sintheta) - trapzp(sintheta));
 
         // calculate new curvature
-        D1D2(positions_np2.col(0), delta_alpha, x_ip, x_ipp);
-        D1D2(positions_np2.col(1), delta_alpha, y_ip, y_ipp);
+        std::tie(x_ip, x_ipp) = D1D2(positions_np2.col(0), delta_alpha);
+        std::tie(y_ip, y_ipp) = D1D2(positions_np2.col(1), delta_alpha);
         dvec dthda_np2 = L_np2 / (2 * M_PI) * (x_ip * y_ipp - y_ip * x_ipp) /
                          (x_ip.square() + y_ip.square()).pow(1.5);
 
