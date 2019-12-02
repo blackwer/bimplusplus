@@ -508,52 +508,52 @@ param_t parse_args(int argc, char *argv[]) {
             break;
 
         case 'r':
-            printf("option -r (etaR) with value `%s'\n", optarg);
+            printf("option -r (--etaR) with value `%s'\n", optarg);
             params.etaR = atof(optarg);
             break;
 
         case 'e':
-            printf("option -e (eta) with value `%s'\n", optarg);
+            printf("option -e (--eta) with value `%s'\n", optarg);
             params.eta = atof(optarg);
             break;
 
         case 'n':
-            printf("option -n (eta0) with value `%s'\n", optarg);
+            printf("option -n (--eta0) with value `%s'\n", optarg);
             params.eta0 = atof(optarg);
             break;
 
         case 'G':
-            printf("option -G (G) with value `%s'\n", optarg);
+            printf("option -G (--G) with value `%s'\n", optarg);
             params.G = atof(optarg);
             break;
 
         case 'g':
-            printf("option -g (gam) with value `%s'\n", optarg);
+            printf("option -g (--gam) with value `%s'\n", optarg);
             params.gam = atof(optarg);
             break;
 
         case 'd':
-            printf("option -d (dt) with value `%s'\n", optarg);
+            printf("option -d (--dt) with value `%s'\n", optarg);
             params.dt = atof(optarg);
             break;
 
         case 't':
-            printf("option -t (t_max) with value `%s'\n", optarg);
+            printf("option -t (--t_max) with value `%s'\n", optarg);
             params.t_max = atof(optarg);
             break;
 
         case 's':
-            printf("option -s (soltol) with value `%s'\n", optarg);
+            printf("option -s (--soltol) with value `%s'\n", optarg);
             params.soltol = atof(optarg);
             break;
 
         case 'f':
-            printf("option -f (n_record) with value `%s'\n", optarg);
+            printf("option -f (--n_record) with value `%s'\n", optarg);
             params.n_record = atoi(optarg);
             break;
 
         case 'N':
-            printf("option -N (N) with value `%s'\n", optarg);
+            printf("option -N (--N) with value `%s'\n", optarg);
             params.N = atoi(optarg);
             break;
 
