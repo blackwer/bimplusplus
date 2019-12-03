@@ -24,7 +24,6 @@
 
 // Output container for later processing
 #include <hdf5.h>
-#include <hdf5_hl.h>
 
 // Accelerates bessel function calls
 #include "function_generator.hpp"
@@ -42,10 +41,9 @@ typedef struct {
     double gam;    // line tension (little gamma)
     double dt;     // timestep
     double soltol; // desired GMRes accuracy
-    double t_max;  // Time to simulate to
+    double tmax;  // Time to simulate to
     int N;         // Number of points on RING
-    int n_record;  // number of timesteps between output
-    std::string output_file;
+    int nrecord;  // number of timesteps between output
 } param_t;
 
 // Some convenience types
@@ -197,31 +195,12 @@ bool file_exists(const std::string &name) {
     return (stat(name.c_str(), &buffer) == 0);
 }
 
-bool group_exists(hid_t file_id, const std::string &name) {
-    // Disable H5 error reporting briefly.
-    H5Eset_auto1(NULL, NULL);
-    herr_t status = H5Gget_objinfo(file_id, name.c_str(), 0, NULL);
-    // Re-enable H5 error reporting.
-    H5Eset_auto1(NULL, NULL);
-
-    return !status;
-}
-
-void writeH5(hid_t group_id, std::string path, const std::vector<hsize_t> &dims,
+void writeH5(hid_t o_id, std::string path, const std::vector<hsize_t> &dims,
              const dvec &arr) {
-    hid_t dataspace_id, dataset_id;
-
-    if (H5LTfind_dataset(group_id, path.c_str())) {
-        std::cout << "Opening existing dataset: " << path << std::endl;
-        dataset_id = H5Dopen(group_id, path.c_str(), H5P_DEFAULT);
-        dataspace_id = H5Dget_space(dataset_id);
-    } else {
-        std::cout << "Creating new dataset: " << path << std::endl;
-        dataspace_id = H5Screate_simple(dims.size(), dims.data(), NULL);
-        dataset_id =
-            H5Dcreate2(group_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                       H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    }
+    std::cout << "Creating new dataset: " << path << std::endl;
+    hid_t dataspace_id = H5Screate_simple(dims.size(), dims.data(), NULL);
+    hid_t dataset_id = H5Dcreate2(o_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
     // Dump output to file
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
@@ -234,21 +213,13 @@ void writeH5(hid_t group_id, std::string path, const std::vector<hsize_t> &dims,
     H5Sclose(dataspace_id);
 }
 
-void writeH5(hid_t group_id, std::string path, double val) {
+void writeH5(hid_t o_id, std::string path, double val) {
     hsize_t dims[1] = {1};
-    hid_t dataspace_id, dataset_id;
 
-    if (H5LTfind_dataset(group_id, path.c_str())) {
-        std::cout << "Opening existing dataset: " << path << std::endl;
-        dataset_id = H5Dopen(group_id, path.c_str(), H5P_DEFAULT);
-        dataspace_id = H5Dget_space(dataset_id);
-    } else {
-        std::cout << "Creating new dataset: " << path << std::endl;
-        dataspace_id = H5Screate_simple(1, dims, NULL);
-        dataset_id =
-            H5Dcreate2(group_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                       H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    }
+    std::cout << "Creating new dataset: " << path << std::endl;
+    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+    hid_t dataset_id = H5Dcreate2(o_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
              &val);
@@ -260,21 +231,13 @@ void writeH5(hid_t group_id, std::string path, double val) {
     H5Sclose(dataspace_id);
 }
 
-void writeH5(hid_t group_id, std::string path, int val) {
+void writeH5(hid_t o_id, std::string path, int val) {
     hsize_t dims[1] = {1};
-    hid_t dataspace_id, dataset_id;
 
-    if (H5LTfind_dataset(group_id, path.c_str())) {
-        std::cout << "Opening existing dataset: " << path << std::endl;
-        dataset_id = H5Dopen(group_id, path.c_str(), H5P_DEFAULT);
-        dataspace_id = H5Dget_space(dataset_id);
-    } else {
-        std::cout << "Creating new dataset: " << path << std::endl;
-        dataspace_id = H5Screate_simple(1, dims, NULL);
-        dataset_id =
-            H5Dcreate2(group_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                       H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    }
+    std::cout << "Creating new dataset: " << path << std::endl;
+    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+    hid_t dataset_id = H5Dcreate2(o_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
     H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &val);
 
@@ -500,9 +463,9 @@ void print_params(param_t &params) {
     std::cout << "gam: " << params.gam << std::endl;
     std::cout << "dt: " << params.dt << std::endl;
     std::cout << "soltol: " << params.soltol << std::endl;
-    std::cout << "t_max: " << params.t_max << std::endl;
+    std::cout << "tmax: " << params.tmax << std::endl;
     std::cout << "N: " << params.N << std::endl;
-    std::cout << "n_record: " << params.n_record << std::endl;
+    std::cout << "nrecord: " << params.nrecord << std::endl;
 }
 
 param_t parse_args(int argc, char *argv[]) {
@@ -514,10 +477,10 @@ param_t parse_args(int argc, char *argv[]) {
     params.eta0 = 1;
     params.G = 10;
     params.gam = 0.01;
-    params.n_record = 100;
+    params.nrecord = 100;
     params.N = pow(2, 7) - 1;
     params.dt = 0.001;
-    params.t_max = 10.0;
+    params.tmax = 10.0;
     params.soltol = 1e-12;
 
     while (true) {
@@ -528,9 +491,9 @@ param_t parse_args(int argc, char *argv[]) {
             {"G", required_argument, 0, 'G'},
             {"gam", required_argument, 0, 'g'},
             {"dt", required_argument, 0, 'd'},
-            {"t_max", required_argument, 0, 't'},
+            {"tmax", required_argument, 0, 't'},
             {"soltol", required_argument, 0, 's'},
-            {"n_record", required_argument, 0, 'f'},
+            {"nrecord", required_argument, 0, 'f'},
             {"N", required_argument, 0, 'N'},
             {0, 0, 0, 0}};
 
@@ -583,8 +546,8 @@ param_t parse_args(int argc, char *argv[]) {
             break;
 
         case 't':
-            printf("option -t (--t_max) with value `%s'\n", optarg);
-            params.t_max = atof(optarg);
+            printf("option -t (--tmax) with value `%s'\n", optarg);
+            params.tmax = atof(optarg);
             break;
 
         case 's':
@@ -593,8 +556,8 @@ param_t parse_args(int argc, char *argv[]) {
             break;
 
         case 'f':
-            printf("option -f (--n_record) with value `%s'\n", optarg);
-            params.n_record = atoi(optarg);
+            printf("option -f (--nrecord) with value `%s'\n", optarg);
+            params.nrecord = atoi(optarg);
             break;
 
         case 'N':
@@ -616,6 +579,20 @@ param_t parse_args(int argc, char *argv[]) {
     params.lam = 1.0 / params.delta;
 
     return params;
+}
+
+std::string gen_name(param_t &params) {
+    using std::to_string;
+    // clang-format off
+    return "etaR=" + to_string(params.etaR) + "_"\
+        "eta=" + to_string(params.eta) + "_"\
+        "eta0=" + to_string(params.eta0) + "_"\
+        "G=" + to_string(params.G) + "_"\
+        "gam=" + to_string(params.gam) + "_"\
+        "dt=" + to_string(params.dt) + "_"\
+        "tmax=" + to_string(params.tmax) + "_"\
+        "N=" + to_string(params.N) + ".h5";
+    // clang-format on
 }
 
 int main(int argc, char *argv[]) {
@@ -716,9 +693,9 @@ int main(int argc, char *argv[]) {
                      (x_ip.square() + y_ip.square()).pow(1.5);
     dvec D_U_np1 = D(U_np1, delta_alpha);
 
-    size_t n_steps = (int)(params.t_max / params.dt);
+    size_t n_steps = (int)(params.tmax / params.dt);
     size_t n_meas =
-        n_steps / params.n_record + (n_steps % params.n_record != 0);
+        n_steps / params.nrecord + (n_steps % params.nrecord != 0);
     dvec theta_t(n_meas * params.N);
     dvec U_t(n_meas * params.N);
     dvec positions_t(n_meas * params.N * 2);
@@ -794,8 +771,8 @@ int main(int argc, char *argv[]) {
         theta_np1 = theta_np2;
         D_U_np1 = D_U_np2;
 
-        if (i_step % params.n_record == 0) {
-            int i_record = i_step / params.n_record;
+        if (i_step % params.nrecord == 0) {
+            int i_record = i_step / params.nrecord;
 
             for (int i = 0; i < params.N; ++i)
                 for (int j = 0; j < 2; ++j)
@@ -808,30 +785,23 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    std::string ofname = gen_name(params);
     hid_t file_id =
-        file_exists("test.h5")
-            ? H5Fopen("test.h5", H5F_ACC_RDWR, H5P_DEFAULT)
-            : H5Fcreate("test.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        H5Fcreate(ofname.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
-    hid_t group_id = group_exists(file_id, "/thissim")
-                         ? H5Gopen(file_id, "/thissim", H5P_DEFAULT)
-                         : H5Gcreate(file_id, "/thissim", H5P_DEFAULT,
-                                     H5P_DEFAULT, H5P_DEFAULT);
-
-    writeH5(group_id, "alpha", {(hsize_t)params.N}, alpha);
-    writeH5(group_id, "theta_t", {(hsize_t)n_meas, (hsize_t)params.N}, theta_t);
-    writeH5(group_id, "U_t", {(hsize_t)n_meas, (hsize_t)params.N}, U_t);
-    writeH5(group_id, "positions_t",
+    writeH5(file_id, "alpha", {(hsize_t)params.N}, alpha);
+    writeH5(file_id, "theta_t", {(hsize_t)n_meas, (hsize_t)params.N}, theta_t);
+    writeH5(file_id, "U_t", {(hsize_t)n_meas, (hsize_t)params.N}, U_t);
+    writeH5(file_id, "positions_t",
             {(hsize_t)n_meas, (hsize_t)params.N, (hsize_t)2}, positions_t);
-    writeH5(group_id, "area_n", area_n);
-    writeH5(group_id, "eta", params.eta);
-    writeH5(group_id, "etaR", params.etaR);
-    writeH5(group_id, "eta0", params.eta0);
-    writeH5(group_id, "G", params.G);
-    writeH5(group_id, "dt", params.dt);
-    writeH5(group_id, "n_record", params.n_record);
+    writeH5(file_id, "area_n", area_n);
+    writeH5(file_id, "eta", params.eta);
+    writeH5(file_id, "etaR", params.etaR);
+    writeH5(file_id, "eta0", params.eta0);
+    writeH5(file_id, "G", params.G);
+    writeH5(file_id, "dt", params.dt);
+    writeH5(file_id, "nrecord", params.nrecord);
 
-    H5Gclose(group_id);
     H5Fclose(file_id);
 
     return 0;

@@ -6,17 +6,18 @@ window_y=1.2;
 fig = figure(); set(gca,'FontSize',18); set(gcf,'color','w');
 
 %% -------- save plot to movie --------
-VW = VideoWriter([filename '.avi']);
+[path, name, ~] = fileparts(filename)
+VW = VideoWriter([name '.avi']);
 VW.FrameRate = 30;
 open(VW);
 
-positions_t = h5read('test.h5', '/positions_t');
-theta_t = h5read('test.h5', '/theta_t');
-U_t = h5read('test.h5', '/U_t');
-alpha = h5read('test.h5', '/alpha')';
-area_n = h5read('test.h5', '/area_n');
-n_record = h5read('test.h5', '/n_record');
-dt = h5read('test.h5', '/dt');
+positions_t = h5read(filename, '/positions_t');
+theta_t = h5read(filename, '/theta_t');
+U_t = h5read(filename, '/U_t');
+alpha = h5read(filename, '/alpha')';
+area_n = h5read(filename, '/area_n');
+n_record = h5read(filename, '/nrecord');
+dt = h5read(filename, '/dt');
 
 n_frames = size(U_t, 2);
 for i = 1:n_frames
@@ -46,4 +47,3 @@ end
 close(fig)
 
 end
-
