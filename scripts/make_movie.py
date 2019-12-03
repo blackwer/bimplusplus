@@ -7,17 +7,19 @@ import h5py
 from matplotlib.animation import FFMpegWriter
 
 with h5py.File("test.h5", "r") as f:
-    positions_t = np.array(f["positions_t"])
-    theta_t = np.array(f["theta_t"])
-    U_t = np.array(f["U_t"])
-    alpha = np.array(f["alpha"])
-    area_n = np.array(f["area_n"])[0]
-    n_record = np.array(f["n_record"])[0]
-    dt = np.array(f["dt"])[0]
+    positions_t = np.array(f["thissim/positions_t"])
+    theta_t = np.array(f["thissim/theta_t"])
+    U_t = np.array(f["thissim/U_t"])
+    alpha = np.array(f["thissim/alpha"])
+    area_n = np.array(f["thissim/area_n"])[0]
+    n_record = np.array(f["thissim/n_record"])[0]
+    dt = np.array(f["thissim/dt"])[0]
 
 fig = plt.figure()
 metadata = dict(title="Movie Test", artist="Me", comment="Testing. Duh.")
 writer = FFMpegWriter(fps=30, metadata=metadata)
+
+print(positions_t.shape, theta_t.shape, U_t.shape, alpha.shape)
 
 with writer.saving(fig, "test.mp4", positions_t.shape[0]):
     for i in range(0, positions_t.shape[0]):

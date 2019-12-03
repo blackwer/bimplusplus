@@ -24,9 +24,12 @@
 
 // Output container for later processing
 #include <hdf5.h>
+#include <hdf5_hl.h>
 
 // Accelerates bessel function calls
 #include "function_generator.hpp"
+
+#include <sys/stat.h>
 
 // Runtime simulation parameters
 typedef struct {
@@ -189,12 +192,36 @@ Eigen::VectorXd inteqnsolve(const param_t &params, const dvecvec &positions,
 // Trapezoidal integration with periodic boundary
 double trapzp(const dvec &a) { return a.sum() * 2 * M_PI / a.size(); }
 
-void writeH5(hid_t fid, std::string path, const std::vector<hsize_t> &dims,
+bool file_exists(const std::string &name) {
+    struct stat buffer;
+    return (stat(name.c_str(), &buffer) == 0);
+}
+
+bool group_exists(hid_t file_id, const std::string &name) {
+    // Disable H5 error reporting briefly.
+    H5Eset_auto1(NULL, NULL);
+    herr_t status = H5Gget_objinfo(file_id, name.c_str(), 0, NULL);
+    // Re-enable H5 error reporting.
+    H5Eset_auto1(NULL, NULL);
+
+    return !status;
+}
+
+void writeH5(hid_t group_id, std::string path, const std::vector<hsize_t> &dims,
              const dvec &arr) {
-    hid_t dataspace_id = H5Screate_simple(dims.size(), dims.data(), NULL);
-    hid_t dataset_id =
-        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    hid_t dataspace_id, dataset_id;
+
+    if (H5LTfind_dataset(group_id, path.c_str())) {
+        std::cout << "Opening existing dataset: " << path << std::endl;
+        dataset_id = H5Dopen(group_id, path.c_str(), H5P_DEFAULT);
+        dataspace_id = H5Dget_space(dataset_id);
+    } else {
+        std::cout << "Creating new dataset: " << path << std::endl;
+        dataspace_id = H5Screate_simple(dims.size(), dims.data(), NULL);
+        dataset_id =
+            H5Dcreate2(group_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                       H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    }
 
     // Dump output to file
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
@@ -207,12 +234,21 @@ void writeH5(hid_t fid, std::string path, const std::vector<hsize_t> &dims,
     H5Sclose(dataspace_id);
 }
 
-void writeH5(hid_t fid, std::string path, double val) {
+void writeH5(hid_t group_id, std::string path, double val) {
     hsize_t dims[1] = {1};
-    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
-    hid_t dataset_id =
-        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
-                   H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    hid_t dataspace_id, dataset_id;
+
+    if (H5LTfind_dataset(group_id, path.c_str())) {
+        std::cout << "Opening existing dataset: " << path << std::endl;
+        dataset_id = H5Dopen(group_id, path.c_str(), H5P_DEFAULT);
+        dataspace_id = H5Dget_space(dataset_id);
+    } else {
+        std::cout << "Creating new dataset: " << path << std::endl;
+        dataspace_id = H5Screate_simple(1, dims, NULL);
+        dataset_id =
+            H5Dcreate2(group_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                       H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    }
 
     H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
              &val);
@@ -224,12 +260,21 @@ void writeH5(hid_t fid, std::string path, double val) {
     H5Sclose(dataspace_id);
 }
 
-void writeH5(hid_t fid, std::string path, int val) {
+void writeH5(hid_t group_id, std::string path, int val) {
     hsize_t dims[1] = {1};
-    hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
-    hid_t dataset_id =
-        H5Dcreate2(fid, path.c_str(), H5T_NATIVE_INT, dataspace_id, H5P_DEFAULT,
-                   H5P_DEFAULT, H5P_DEFAULT);
+    hid_t dataspace_id, dataset_id;
+
+    if (H5LTfind_dataset(group_id, path.c_str())) {
+        std::cout << "Opening existing dataset: " << path << std::endl;
+        dataset_id = H5Dopen(group_id, path.c_str(), H5P_DEFAULT);
+        dataspace_id = H5Dget_space(dataset_id);
+    } else {
+        std::cout << "Creating new dataset: " << path << std::endl;
+        dataspace_id = H5Screate_simple(1, dims, NULL);
+        dataset_id =
+            H5Dcreate2(group_id, path.c_str(), H5T_NATIVE_DOUBLE, dataspace_id,
+                       H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    }
 
     H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &val);
 
@@ -603,8 +648,8 @@ int main(int argc, char *argv[]) {
     positions_n.col(0) = x_i;
     positions_n.col(1) = y_i;
 
-    auto[x_ip, x_ipp] = D1D2(x_i, delta_alpha);
-    auto[y_ip, y_ipp] = D1D2(y_i, delta_alpha);
+    auto [x_ip, x_ipp] = D1D2(x_i, delta_alpha);
+    auto [y_ip, y_ipp] = D1D2(y_i, delta_alpha);
 
     dvecvec tangents_n(params.N, 2);
     tangents_n.col(0) = 2 * M_PI / L_n * x_ip;
@@ -764,20 +809,29 @@ int main(int argc, char *argv[]) {
     }
 
     hid_t file_id =
-        H5Fcreate("test.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    writeH5(file_id, "/alpha", {(hsize_t)params.N}, alpha);
-    writeH5(file_id, "/theta_t", {(hsize_t)n_meas, (hsize_t)params.N}, theta_t);
-    writeH5(file_id, "/U_t", {(hsize_t)n_meas, (hsize_t)params.N}, U_t);
-    writeH5(file_id, "/positions_t",
-            {(hsize_t)n_meas, (hsize_t)params.N, (hsize_t)2}, positions_t);
-    writeH5(file_id, "/area_n", area_n);
-    writeH5(file_id, "/etaR", params.etaR);
-    writeH5(file_id, "/eta", params.eta);
-    writeH5(file_id, "/eta0", params.eta0);
-    writeH5(file_id, "/G", params.G);
-    writeH5(file_id, "/dt", params.dt);
-    writeH5(file_id, "/n_record", params.n_record);
+        file_exists("test.h5")
+            ? H5Fopen("test.h5", H5F_ACC_RDWR, H5P_DEFAULT)
+            : H5Fcreate("test.h5", H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
+    hid_t group_id = group_exists(file_id, "/thissim")
+                         ? H5Gopen(file_id, "/thissim", H5P_DEFAULT)
+                         : H5Gcreate(file_id, "/thissim", H5P_DEFAULT,
+                                     H5P_DEFAULT, H5P_DEFAULT);
+
+    writeH5(group_id, "alpha", {(hsize_t)params.N}, alpha);
+    writeH5(group_id, "theta_t", {(hsize_t)n_meas, (hsize_t)params.N}, theta_t);
+    writeH5(group_id, "U_t", {(hsize_t)n_meas, (hsize_t)params.N}, U_t);
+    writeH5(group_id, "positions_t",
+            {(hsize_t)n_meas, (hsize_t)params.N, (hsize_t)2}, positions_t);
+    writeH5(group_id, "area_n", area_n);
+    writeH5(group_id, "eta", params.eta);
+    writeH5(group_id, "etaR", params.etaR);
+    writeH5(group_id, "eta0", params.eta0);
+    writeH5(group_id, "G", params.G);
+    writeH5(group_id, "dt", params.dt);
+    writeH5(group_id, "n_record", params.n_record);
+
+    H5Gclose(group_id);
     H5Fclose(file_id);
 
     return 0;
